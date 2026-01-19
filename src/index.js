@@ -33,7 +33,7 @@ const authMiddleware = async (c, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     console.log(`✅ JWT検証成功: userId=${decoded.userId}`);
     
-    const session = db.prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > datetime("now")').get(token);
+    const session = db.prepare("SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')").get(token);
     console.log(`🔍 セッション検索: 見つかった=${!!session}`);
     
     if (!session) {
