@@ -23,7 +23,8 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
-    is_admin INTEGER DEFAULT 0,
+    role TEXT DEFAULT 'crew' CHECK(role IN ('admin', 'leader', 'crew')),
+    must_change_password INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -33,6 +34,7 @@ db.exec(`
     url TEXT NOT NULL,
     description TEXT,
     order_index INTEGER DEFAULT 0,
+    required_role TEXT DEFAULT 'crew' CHECK(required_role IN ('admin', 'leader', 'crew')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -46,37 +48,98 @@ db.exec(`
   );
 `);
 
+// 既存テーブルに新しいカラムを追加（マイグレーション）
+try {
+  // usersテーブルにroleカラムを追加
+  db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'crew' CHECK(role IN ('admin', 'leader', 'crew'))`);
+  console.log('✅ usersテーブルにroleカラムを追加しました');
+} catch (e) {
+  // カラムが既に存在する場合はエラーを無視
+  if (!e.message.includes('duplicate column')) {
+    console.log('ℹ️  usersテーブルのroleカラムは既に存在します');
+  }
+}
+
+try {
+  // usersテーブルにmust_change_passwordカラムを追加
+  db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0`);
+  console.log('✅ usersテーブルにmust_change_passwordカラムを追加しました');
+} catch (e) {
+  if (!e.message.includes('duplicate column')) {
+    console.log('ℹ️  usersテーブルのmust_change_passwordカラムは既に存在します');
+  }
+}
+
+try {
+  // systemsテーブルにrequired_roleカラムを追加
+  db.exec(`ALTER TABLE systems ADD COLUMN required_role TEXT DEFAULT 'crew' CHECK(required_role IN ('admin', 'leader', 'crew'))`);
+  console.log('✅ systemsテーブルにrequired_roleカラムを追加しました');
+} catch (e) {
+  if (!e.message.includes('duplicate column')) {
+    console.log('ℹ️  systemsテーブルのrequired_roleカラムは既に存在します');
+  }
+}
+
+// 既存のis_adminカラムからroleカラムへの移行
+try {
+  const usersWithOldSchema = db.prepare('SELECT id, is_admin FROM users WHERE role IS NULL OR role = ""').all();
+  if (usersWithOldSchema.length > 0) {
+    console.log(`🔄 ${usersWithOldSchema.length}人のユーザーをis_adminからroleに移行中...`);
+    const updateRole = db.prepare('UPDATE users SET role = ? WHERE id = ?');
+    usersWithOldSchema.forEach(user => {
+      const role = user.is_admin ? 'admin' : 'crew';
+      updateRole.run(role, user.id);
+    });
+    console.log('✅ ユーザーのロール移行が完了しました');
+  }
+} catch (e) {
+  console.log('ℹ️  ロール移行処理をスキップ:', e.message);
+}
+
 // デフォルトの管理者ユーザーを作成（username: admin, password: admin123）
 const checkAdmin = db.prepare('SELECT COUNT(*) as count FROM users WHERE username = ?').get('admin');
 console.log(`📊 既存の管理者ユーザー数: ${checkAdmin.count}`);
 
 if (checkAdmin.count === 0) {
   const hashedPassword = bcrypt.hashSync('admin123', 10);
-  db.prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)').run('admin', hashedPassword);
-  console.log('✅ デフォルト管理者ユーザーを作成しました (username: admin)');
+  db.prepare('INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, ?)').run('admin', hashedPassword, 'admin', 0);
+  console.log('✅ デフォルト管理者ユーザーを作成しました (username: admin, role: admin)');
 } else {
   console.log('ℹ️  管理者ユーザーは既に存在します');
+  // 既存のadminユーザーのroleを確実に'admin'に設定
+  db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', 'admin');
 }
 
 // 全ユーザーを確認
-const allUsers = db.prepare('SELECT id, username, is_admin FROM users').all();
+const allUsers = db.prepare('SELECT id, username, role, must_change_password FROM users').all();
 console.log('📋 現在のユーザー一覧:', allUsers);
 
 // デフォルトのシステムリンクを追加
 const checkSystems = db.prepare('SELECT COUNT(*) as count FROM systems').get();
 if (checkSystems.count === 0) {
   const systems = [
-    { name: 'WannaV 延長管理システム', url: 'https://extended-management.onrender.com/', order_index: 1 },
-    { name: 'WannaV わなみさん使用ログ分析', url: 'https://wanamisan-monitor.onrender.com/', order_index: 2 },
-    { name: 'WannaV成長度リザルトシステム', url: 'https://vtuber-school-evaluation.onrender.com/', order_index: 3 },
-    { name: '発話比率算出AI', url: 'https://speech-ratio-evaluation-ai.onrender.com/', order_index: 4 }
+    { name: 'WannaV 延長管理システム', url: 'https://extended-management.onrender.com/', order_index: 1, required_role: 'crew' },
+    { name: 'WannaV わなみさん使用ログ分析', url: 'https://wanamisan-monitor.onrender.com/', order_index: 2, required_role: 'leader' },
+    { name: 'WannaV成長度リザルトシステム', url: 'https://vtuber-school-evaluation.onrender.com/', order_index: 3, required_role: 'crew' },
+    { name: '発話比率算出AI', url: 'https://speech-ratio-evaluation-ai.onrender.com/', order_index: 4, required_role: 'admin' }
   ];
   
-  const stmt = db.prepare('INSERT INTO systems (name, url, order_index) VALUES (?, ?, ?)');
+  const stmt = db.prepare('INSERT INTO systems (name, url, order_index, required_role) VALUES (?, ?, ?, ?)');
   systems.forEach(sys => {
-    stmt.run(sys.name, sys.url, sys.order_index);
+    stmt.run(sys.name, sys.url, sys.order_index, sys.required_role);
   });
   console.log('✅ デフォルトシステムリンクを追加しました');
+} else {
+  // 既存システムにrequired_roleが設定されていない場合はデフォルト値を設定
+  const systemsWithoutRole = db.prepare('SELECT id FROM systems WHERE required_role IS NULL OR required_role = ""').all();
+  if (systemsWithoutRole.length > 0) {
+    console.log(`🔄 ${systemsWithoutRole.length}個のシステムリンクにrequired_roleを設定中...`);
+    const updateRole = db.prepare('UPDATE systems SET required_role = ? WHERE id = ?');
+    systemsWithoutRole.forEach(sys => {
+      updateRole.run('crew', sys.id);
+    });
+    console.log('✅ システムリンクのrequired_role設定が完了しました');
+  }
 }
 
 export default db;

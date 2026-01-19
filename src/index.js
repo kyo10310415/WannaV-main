@@ -10,6 +10,27 @@ const app = new Hono();
 const JWT_SECRET = process.env.JWT_SECRET || 'wannav-secret-key-change-in-production';
 const PORT = process.env.PORT || 3000;
 
+// ロール権限レベル定義
+const ROLE_LEVELS = {
+  'admin': 3,
+  'leader': 2,
+  'crew': 1
+};
+
+// 権限チェックヘルパー関数
+function hasPermission(userRole, requiredRole) {
+  return ROLE_LEVELS[userRole] >= ROLE_LEVELS[requiredRole];
+}
+
+function getRoleLabel(role) {
+  const labels = {
+    'admin': '管理者',
+    'leader': 'リーダー',
+    'crew': 'クルー'
+  };
+  return labels[role] || role;
+}
+
 // 静的ファイルの提供
 app.use('/static/*', serveStatic({ root: './' }));
 app.use('/public/*', serveStatic({ root: './' }));
@@ -41,15 +62,21 @@ const authMiddleware = async (c, next) => {
       return c.redirect('/login');
     }
 
-    const user = db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(session.user_id);
-    console.log(`🔍 ユーザー検索: 見つかった=${!!user}, username=${user?.username}`);
+    const user = db.prepare('SELECT id, username, role, must_change_password FROM users WHERE id = ?').get(session.user_id);
+    console.log(`🔍 ユーザー検索: 見つかった=${!!user}, username=${user?.username}, role=${user?.role}`);
     
     if (!user) {
       console.log('❌ 認証失敗: ユーザーなし → /loginにリダイレクト');
       return c.redirect('/login');
     }
 
-    console.log(`✅ 認証成功: ${user.username} (ID: ${user.id})`);
+    // 初回ログイン時のパスワード変更チェック（change-passwordページ以外）
+    if (user.must_change_password && !c.req.path.startsWith('/change-password') && !c.req.path.startsWith('/api/change-password')) {
+      console.log(`⚠️  ${user.username} は初回パスワード変更が必要 → /change-passwordにリダイレクト`);
+      return c.redirect('/change-password');
+    }
+
+    console.log(`✅ 認証成功: ${user.username} (ID: ${user.id}, Role: ${user.role})`);
     c.set('user', user);
     await next();
   } catch (error) {
@@ -58,10 +85,21 @@ const authMiddleware = async (c, next) => {
   }
 };
 
+// リーダー以上チェックミドルウェア
+const leaderMiddleware = async (c, next) => {
+  const user = c.get('user');
+  if (!user || !hasPermission(user.role, 'leader')) {
+    console.log(`❌ 権限不足: ${user?.username} (${user?.role}) はリーダー以上の権限が必要`);
+    return c.json({ error: 'リーダー以上の権限が必要です' }, 403);
+  }
+  await next();
+};
+
 // 管理者チェックミドルウェア
 const adminMiddleware = async (c, next) => {
   const user = c.get('user');
-  if (!user || !user.is_admin) {
+  if (!user || user.role !== 'admin') {
+    console.log(`❌ 権限不足: ${user?.username} (${user?.role}) は管理者権限が必要`);
     return c.json({ error: '管理者権限が必要です' }, 403);
   }
   await next();
