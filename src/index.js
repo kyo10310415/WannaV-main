@@ -16,29 +16,44 @@ app.use('/public/*', serveStatic({ root: './' }));
 
 // 認証ミドルウェア
 const authMiddleware = async (c, next) => {
-  const cookies = parse(c.req.header('cookie') || '');
+  const cookieHeader = c.req.header('cookie') || '';
+  console.log(`🔍 認証チェック: Cookie Header = ${cookieHeader.substring(0, 100)}`);
+  
+  const cookies = parse(cookieHeader);
   const token = cookies.auth_token;
+  
+  console.log(`🔍 認証チェック: Token存在 = ${!!token}`);
 
   if (!token) {
+    console.log('❌ 認証失敗: トークンなし → /loginにリダイレクト');
     return c.redirect('/login');
   }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    console.log(`✅ JWT検証成功: userId=${decoded.userId}`);
+    
     const session = db.prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > datetime("now")').get(token);
+    console.log(`🔍 セッション検索: 見つかった=${!!session}`);
     
     if (!session) {
+      console.log('❌ 認証失敗: セッションなしまたは期限切れ → /loginにリダイレクト');
       return c.redirect('/login');
     }
 
     const user = db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(session.user_id);
+    console.log(`🔍 ユーザー検索: 見つかった=${!!user}, username=${user?.username}`);
+    
     if (!user) {
+      console.log('❌ 認証失敗: ユーザーなし → /loginにリダイレクト');
       return c.redirect('/login');
     }
 
+    console.log(`✅ 認証成功: ${user.username} (ID: ${user.id})`);
     c.set('user', user);
     await next();
   } catch (error) {
+    console.error('❌ 認証エラー:', error.message);
     return c.redirect('/login');
   }
 };
