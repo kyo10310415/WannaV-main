@@ -163,15 +163,18 @@ webapp/
 
 ## 🌐 公開URL
 
+- **本番環境**: https://wannav-main.onrender.com
 - **GitHub**: https://github.com/kyo10310415/WannaV-main
-- **Render**: デプロイ後にURLが発行されます
 
 ## 📅 更新履歴
 
 - **2026-01-19**: 初回リリース
-  - 認証機能実装
+  - 認証機能実装（JWT + Cookie）
   - ユーザー管理機能実装
   - システムリンク管理機能実装
+  - Renderへのデプロイ完了
+  - SQLite datetime構文の修正
+  - Cookie設定の本番環境対応
 
 ## 👤 作成者
 
