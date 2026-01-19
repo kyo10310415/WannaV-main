@@ -100,10 +100,6 @@ app.get('/login', (c) => {
                 <i class="fas fa-sign-in-alt mr-2"></i>ログイン
             </button>
         </form>
-
-        <div class="mt-6 text-center text-sm text-gray-600">
-            <p>デフォルトアカウント: <code class="bg-gray-100 px-2 py-1 rounded">admin / admin123</code></p>
-        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
@@ -538,23 +534,32 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
 app.post('/api/login', async (c) => {
   try {
     const { username, password } = await c.req.json();
+    console.log(`🔐 ログイン試行: ユーザー名=${username}`);
 
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     if (!user) {
+      console.log(`❌ ログイン失敗: ユーザーが存在しません (${username})`);
       return c.json({ error: 'ユーザー名またはパスワードが正しくありません' }, 401);
     }
 
+    console.log(`✅ ユーザー発見: ${username} (ID: ${user.id})`);
+    
     const valid = bcrypt.compareSync(password, user.password);
     if (!valid) {
+      console.log(`❌ ログイン失敗: パスワードが一致しません (${username})`);
       return c.json({ error: 'ユーザー名またはパスワードが正しくありません' }, 401);
     }
+
+    console.log(`✅ パスワード認証成功: ${username}`);
 
     // JWTトークンの生成
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    console.log(`✅ JWTトークン生成完了: ${username}`);
 
     // セッションの保存
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     db.prepare('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)').run(user.id, token, expiresAt);
+    console.log(`✅ セッション保存完了: ${username}`);
 
     // Cookieの設定
     c.header('Set-Cookie', serialize('auth_token', token, {
@@ -565,9 +570,10 @@ app.post('/api/login', async (c) => {
       path: '/'
     }));
 
+    console.log(`✅ ログイン成功: ${username}`);
     return c.json({ success: true, username: user.username });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     return c.json({ error: 'ログイン処理中にエラーが発生しました' }, 500);
   }
 });

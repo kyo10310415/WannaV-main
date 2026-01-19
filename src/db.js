@@ -48,11 +48,19 @@ db.exec(`
 
 // デフォルトの管理者ユーザーを作成（username: admin, password: admin123）
 const checkAdmin = db.prepare('SELECT COUNT(*) as count FROM users WHERE username = ?').get('admin');
+console.log(`📊 既存の管理者ユーザー数: ${checkAdmin.count}`);
+
 if (checkAdmin.count === 0) {
   const hashedPassword = bcrypt.hashSync('admin123', 10);
   db.prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1)').run('admin', hashedPassword);
-  console.log('✅ デフォルト管理者ユーザーを作成しました (username: admin, password: admin123)');
+  console.log('✅ デフォルト管理者ユーザーを作成しました (username: admin)');
+} else {
+  console.log('ℹ️  管理者ユーザーは既に存在します');
 }
+
+// 全ユーザーを確認
+const allUsers = db.prepare('SELECT id, username, is_admin FROM users').all();
+console.log('📋 現在のユーザー一覧:', allUsers);
 
 // デフォルトのシステムリンクを追加
 const checkSystems = db.prepare('SELECT COUNT(*) as count FROM systems').get();
