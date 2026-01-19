@@ -104,17 +104,29 @@ app.get('/login', (c) => {
 
     <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
     <script>
+        // axiosの設定: Cookieを確実に送受信する
+        axios.defaults.withCredentials = true;
+        
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
 
+            console.log('ログイン試行中...');
+            
             try {
                 const response = await axios.post('/api/login', data);
+                console.log('ログイン成功:', response.data);
+                
                 if (response.data.success) {
-                    window.location.href = '/';
+                    console.log('ダッシュボードにリダイレクト中...');
+                    // 少し待機してからリダイレクト（Cookieが確実に設定されるように）
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 100);
                 }
             } catch (error) {
+                console.error('ログインエラー:', error);
                 const errorDiv = document.getElementById('error');
                 const errorMessage = document.getElementById('error-message');
                 errorDiv.classList.remove('hidden');
@@ -138,7 +150,7 @@ app.get('/logout', (c) => {
 
   c.header('Set-Cookie', serialize('auth_token', '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     sameSite: 'lax',
     maxAge: -1,
     path: '/'
@@ -562,15 +574,20 @@ app.post('/api/login', async (c) => {
     console.log(`✅ セッション保存完了: ${username}`);
 
     // Cookieの設定
-    c.header('Set-Cookie', serialize('auth_token', token, {
+    const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true, // RenderはHTTPSなので常にtrue
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60,
       path: '/'
-    }));
-
+    };
+    
+    const cookieHeader = serialize('auth_token', token, cookieOptions);
+    c.header('Set-Cookie', cookieHeader);
+    
+    console.log(`🍪 Cookie設定: ${cookieHeader.substring(0, 100)}...`);
     console.log(`✅ ログイン成功: ${username}`);
+    
     return c.json({ success: true, username: user.username });
   } catch (error) {
     console.error('❌ Login error:', error);
