@@ -82,7 +82,7 @@ try {
 
 // 既存のis_adminカラムからroleカラムへの移行
 try {
-  const usersWithOldSchema = db.prepare("SELECT id, is_admin FROM users WHERE role IS NULL OR role = ''").all();
+  const usersWithOldSchema = db.prepare('SELECT id, is_admin FROM users WHERE role IS NULL OR LENGTH(role) = 0').all();
   if (usersWithOldSchema.length > 0) {
     console.log(`🔄 ${usersWithOldSchema.length}人のユーザーをis_adminからroleに移行中...`);
     const updateRole = db.prepare('UPDATE users SET role = ? WHERE id = ?');
@@ -131,7 +131,7 @@ if (checkSystems.count === 0) {
   console.log('✅ デフォルトシステムリンクを追加しました');
 } else {
   // 既存システムにrequired_roleが設定されていない場合はデフォルト値を設定
-  const systemsWithoutRole = db.prepare("SELECT id FROM systems WHERE required_role IS NULL OR required_role = ''").all();
+  const systemsWithoutRole = db.prepare('SELECT id FROM systems WHERE required_role IS NULL OR LENGTH(required_role) = 0').all();
   if (systemsWithoutRole.length > 0) {
     console.log(`🔄 ${systemsWithoutRole.length}個のシステムリンクにrequired_roleを設定中...`);
     const updateRole = db.prepare('UPDATE systems SET required_role = ? WHERE id = ?');
