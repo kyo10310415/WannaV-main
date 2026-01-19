@@ -192,6 +192,111 @@ app.get('/login', (c) => {
   `);
 });
 
+// パスワード変更画面（初回ログイン時）
+app.get('/change-password', authMiddleware, (c) => {
+  const user = c.get('user');
+  
+  return c.html(`
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>パスワード変更 - WannaV Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gradient-to-br from-orange-600 to-red-500 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+        <div class="text-center mb-8">
+            <div class="inline-block bg-orange-100 p-4 rounded-full mb-4">
+                <i class="fas fa-key text-orange-600 text-4xl"></i>
+            </div>
+            <h1 class="text-3xl font-bold text-gray-800">パスワード変更</h1>
+            <p class="text-gray-600 mt-2">初回ログインのため、パスワードを変更してください</p>
+            <p class="text-sm text-gray-500 mt-1">ユーザー: <strong>${user.username}</strong></p>
+        </div>
+
+        <div id="error" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            <p id="error-message"></p>
+        </div>
+
+        <div id="success" class="hidden bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+            <p id="success-message"></p>
+        </div>
+
+        <form id="changePasswordForm" class="space-y-6">
+            <div>
+                <label class="block text-gray-700 font-semibold mb-2">
+                    <i class="fas fa-lock mr-2"></i>新しいパスワード
+                </label>
+                <input type="password" name="newPassword" required minlength="4"
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <p class="text-xs text-gray-500 mt-1">4文字以上で入力してください</p>
+            </div>
+
+            <div>
+                <label class="block text-gray-700 font-semibold mb-2">
+                    <i class="fas fa-lock mr-2"></i>新しいパスワード（確認）
+                </label>
+                <input type="password" name="confirmPassword" required minlength="4"
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+            </div>
+
+            <button type="submit"
+                class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200">
+                <i class="fas fa-check mr-2"></i>パスワードを変更
+            </button>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <script>
+        axios.defaults.withCredentials = true;
+        
+        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                newPassword: formData.get('newPassword'),
+                confirmPassword: formData.get('confirmPassword')
+            };
+
+            const errorDiv = document.getElementById('error');
+            const errorMessage = document.getElementById('error-message');
+            const successDiv = document.getElementById('success');
+            const successMessage = document.getElementById('success-message');
+
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
+
+            // パスワード一致チェック
+            if (data.newPassword !== data.confirmPassword) {
+                errorDiv.classList.remove('hidden');
+                errorMessage.textContent = 'パスワードが一致しません';
+                return;
+            }
+
+            try {
+                const response = await axios.post('/api/change-password', { password: data.newPassword });
+                
+                if (response.data.success) {
+                    successDiv.classList.remove('hidden');
+                    successMessage.textContent = 'パスワードを変更しました。ダッシュボードに移動します...';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                }
+            } catch (error) {
+                errorDiv.classList.remove('hidden');
+                errorMessage.textContent = error.response?.data?.error || 'パスワード変更に失敗しました';
+            }
+        });
+    </script>
+</body>
+</html>
+  `);
+});
 // ログアウト
 app.get('/logout', (c) => {
   const cookies = parse(c.req.header('cookie') || '');
@@ -215,7 +320,10 @@ app.get('/logout', (c) => {
 // メインダッシュボード
 app.get('/', authMiddleware, (c) => {
   const user = c.get('user');
-  const systems = db.prepare('SELECT * FROM systems ORDER BY order_index ASC').all();
+  const allSystems = db.prepare('SELECT * FROM systems ORDER BY order_index ASC').all();
+  
+  // ユーザーの権限で表示できるシステムのみフィルタリング
+  const systems = allSystems.filter(sys => hasPermission(user.role, sys.required_role || 'crew'));
 
   return c.html(`
 <!DOCTYPE html>
@@ -238,8 +346,11 @@ app.get('/', authMiddleware, (c) => {
                 <div class="flex items-center space-x-4">
                     <span class="text-gray-700">
                         <i class="fas fa-user mr-2"></i>${user.username}
+                        <span class="ml-2 px-2 py-1 text-xs font-semibold rounded ${user.role === 'admin' ? 'bg-purple-100 text-purple-800' : user.role === 'leader' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}">
+                            ${getRoleLabel(user.role)}
+                        </span>
                     </span>
-                    ${user.is_admin ? '<a href="/admin" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition duration-200"><i class="fas fa-cog mr-2"></i>管理</a>' : ''}
+                    ${hasPermission(user.role, 'leader') ? '<a href="/admin" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition duration-200"><i class="fas fa-cog mr-2"></i>管理</a>' : ''}
                     <a href="/logout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition duration-200">
                         <i class="fas fa-sign-out-alt mr-2"></i>ログアウト
                     </a>
@@ -260,10 +371,15 @@ app.get('/', authMiddleware, (c) => {
                     <a href="${sys.url}" target="_blank" 
                        class="block bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white rounded-lg p-6 shadow-md transition duration-200 transform hover:scale-105">
                         <div class="flex items-center justify-between">
-                            <div>
-                                <h3 class="text-xl font-bold mb-2">
-                                    <i class="fas fa-external-link-alt mr-2"></i>${sys.name}
-                                </h3>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <h3 class="text-xl font-bold">
+                                        <i class="fas fa-external-link-alt mr-2"></i>${sys.name}
+                                    </h3>
+                                    <span class="text-xs px-2 py-1 bg-white bg-opacity-30 rounded">
+                                        ${getRoleLabel(sys.required_role || 'crew')}以上
+                                    </span>
+                                </div>
                                 ${sys.description ? `<p class="text-sm opacity-90">${sys.description}</p>` : ''}
                             </div>
                             <i class="fas fa-arrow-right text-2xl"></i>
@@ -289,9 +405,9 @@ app.get('/', authMiddleware, (c) => {
 });
 
 // 管理画面
-app.get('/admin', authMiddleware, adminMiddleware, (c) => {
+app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
   const user = c.get('user');
-  const users = db.prepare('SELECT id, username, is_admin, created_at FROM users').all();
+  const users = db.prepare('SELECT id, username, role, must_change_password, created_at FROM users').all();
   const systems = db.prepare('SELECT * FROM systems ORDER BY order_index ASC').all();
 
   return c.html(`
@@ -343,7 +459,8 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ユーザー名</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">管理者</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">権限</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">パスワード変更要求</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">作成日</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
                         </tr>
@@ -354,7 +471,12 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${u.id}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${u.username}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                    ${u.is_admin ? '<span class="px-2 py-1 bg-purple-100 text-purple-800 rounded">管理者</span>' : '<span class="px-2 py-1 bg-gray-100 text-gray-800 rounded">一般</span>'}
+                                    <span class="px-2 py-1 rounded ${u.role === 'admin' ? 'bg-purple-100 text-purple-800' : u.role === 'leader' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}">
+                                        ${getRoleLabel(u.role)}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    ${u.must_change_password ? '<span class="px-2 py-1 bg-orange-100 text-orange-800 rounded">要変更</span>' : '<span class="text-gray-500">-</span>'}
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${new Date(u.created_at).toLocaleString('ja-JP')}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
@@ -391,7 +513,7 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                             ${sys.description ? `<p class="text-sm text-gray-600 mt-1">${sys.description}</p>` : ''}
                         </div>
                         <div class="flex items-center space-x-2">
-                            <button onclick="editSystem(${sys.id}, '${sys.name.replace(/'/g, "\\'")}', '${sys.url}', '${sys.description || ''}', ${sys.order_index})" 
+                            <button onclick="editSystem(${sys.id}, '${sys.name.replace(/'/g, "\\'")}', '${sys.url}', '${sys.description || ''}', ${sys.order_index}, '${sys.required_role || 'crew'}')" 
                                     class="text-blue-600 hover:text-blue-900 px-3 py-2">
                                 <i class="fas fa-edit"></i> 編集
                             </button>
@@ -434,14 +556,16 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                         <input type="text" name="username" required class="w-full px-4 py-2 border rounded-lg">
                     </div>
                     <div>
-                        <label class="block text-gray-700 font-semibold mb-2">パスワード</label>
-                        <input type="password" name="password" required class="w-full px-4 py-2 border rounded-lg">
+                        <label class="block text-gray-700 font-semibold mb-2">権限</label>
+                        <select name="role" required class="w-full px-4 py-2 border rounded-lg">
+                            <option value="crew">クルー（一般）</option>
+                            <option value="leader">リーダー（上位）</option>
+                            <option value="admin">管理者（最上位）</option>
+                        </select>
                     </div>
-                    <div>
-                        <label class="flex items-center">
-                            <input type="checkbox" name="is_admin" class="mr-2">
-                            <span class="text-gray-700">管理者権限を付与</span>
-                        </label>
+                    <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        初期パスワードは <strong>1111</strong> です。初回ログイン時にパスワード変更が要求されます。
                     </div>
                     <div class="flex space-x-4">
                         <button type="submit" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">追加</button>
@@ -456,13 +580,12 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                 const formData = new FormData(e.target);
                 const data = {
                     username: formData.get('username'),
-                    password: formData.get('password'),
-                    is_admin: formData.get('is_admin') ? 1 : 0
+                    role: formData.get('role')
                 };
                 
                 try {
                     await axios.post('/api/admin/users', data);
-                    alert('ユーザーを追加しました');
+                    alert('ユーザーを追加しました（初期パスワード: 1111）');
                     location.reload();
                 } catch (error) {
                     alert('エラー: ' + (error.response?.data?.error || 'ユーザーの追加に失敗しました'));
@@ -510,6 +633,14 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                         <input type="text" name="description" class="w-full px-4 py-2 border rounded-lg">
                     </div>
                     <div>
+                        <label class="block text-gray-700 font-semibold mb-2">必要権限</label>
+                        <select name="required_role" required class="w-full px-4 py-2 border rounded-lg">
+                            <option value="crew">クルー以上</option>
+                            <option value="leader">リーダー以上</option>
+                            <option value="admin">管理者のみ</option>
+                        </select>
+                    </div>
+                    <div>
                         <label class="block text-gray-700 font-semibold mb-2">表示順序</label>
                         <input type="number" name="order_index" value="0" class="w-full px-4 py-2 border rounded-lg">
                     </div>
@@ -536,7 +667,7 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
             });
         }
 
-        function editSystem(id, name, url, description, orderIndex) {
+        function editSystem(id, name, url, description, orderIndex, requiredRole) {
             const content = \`
                 <form id="editSystemForm" class="space-y-4">
                     <div>
@@ -550,6 +681,14 @@ app.get('/admin', authMiddleware, adminMiddleware, (c) => {
                     <div>
                         <label class="block text-gray-700 font-semibold mb-2">説明（オプション）</label>
                         <input type="text" name="description" value="\${description}" class="w-full px-4 py-2 border rounded-lg">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-2">必要権限</label>
+                        <select name="required_role" required class="w-full px-4 py-2 border rounded-lg">
+                            <option value="crew" \${requiredRole === 'crew' ? 'selected' : ''}>クルー以上</option>
+                            <option value="leader" \${requiredRole === 'leader' ? 'selected' : ''}>リーダー以上</option>
+                            <option value="admin" \${requiredRole === 'admin' ? 'selected' : ''}>管理者のみ</option>
+                        </select>
                     </div>
                     <div>
                         <label class="block text-gray-700 font-semibold mb-2">表示順序</label>
@@ -648,18 +787,51 @@ app.post('/api/login', async (c) => {
   }
 });
 
-// API: ユーザー追加（管理者のみ）
-app.post('/api/admin/users', authMiddleware, adminMiddleware, async (c) => {
+// API: 初回パスワード変更
+app.post('/api/change-password', authMiddleware, async (c) => {
   try {
-    const { username, password, is_admin } = await c.req.json();
+    const user = c.get('user');
+    const { password } = await c.req.json();
+
+    if (!password || password.length < 4) {
+      return c.json({ error: 'パスワードは4文字以上で入力してください' }, 400);
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    db.prepare('UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?').run(hashedPassword, user.id);
+
+    console.log(`✅ ${user.username} のパスワードを変更しました`);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('❌ Password change error:', error);
+    return c.json({ error: 'パスワード変更中にエラーが発生しました' }, 500);
+  }
+});
+
+// API: ユーザー追加（リーダー以上）
+app.post('/api/admin/users', authMiddleware, leaderMiddleware, async (c) => {
+  try {
+    const { username, role } = await c.req.json();
+    const password = '1111'; // 初期パスワードは1111
 
     const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
     if (existing) {
       return c.json({ error: 'このユーザー名は既に使用されています' }, 400);
     }
 
+    // roleの検証
+    if (!['admin', 'leader', 'crew'].includes(role)) {
+      return c.json({ error: '無効な権限です' }, 400);
+    }
+
     const hashedPassword = bcrypt.hashSync(password, 10);
-    const result = db.prepare('INSERT INTO users (username, password, is_admin) VALUES (?, ?, ?)').run(username, hashedPassword, is_admin ? 1 : 0);
+    // admin以外は初回パスワード変更を要求
+    const mustChangePassword = username !== 'admin' ? 1 : 0;
+    
+    const result = db.prepare('INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, ?)').run(username, hashedPassword, role, mustChangePassword);
+
+    console.log(`✅ 新規ユーザー作成: ${username} (role: ${role}, 初期パスワード: 1111)`);
 
     return c.json({ success: true, userId: result.lastInsertRowid });
   } catch (error) {
@@ -669,7 +841,7 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (c) => {
 });
 
 // API: パスワード変更（管理者のみ）
-app.put('/api/admin/users/:id/password', authMiddleware, adminMiddleware, async (c) => {
+app.put('/api/admin/users/:id/password', authMiddleware, leaderMiddleware, async (c) => {
   try {
     const userId = c.req.param('id');
     const { password } = await c.req.json();
@@ -688,7 +860,7 @@ app.put('/api/admin/users/:id/password', authMiddleware, adminMiddleware, async 
 });
 
 // API: ユーザー削除（管理者のみ）
-app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (c) => {
+app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, async (c) => {
   try {
     const userId = c.req.param('id');
 
@@ -708,12 +880,17 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (c) =>
   }
 });
 
-// API: システムリンク追加（管理者のみ）
-app.post('/api/admin/systems', authMiddleware, adminMiddleware, async (c) => {
+// API: システムリンク追加（リーダー以上）
+app.post('/api/admin/systems', authMiddleware, leaderMiddleware, async (c) => {
   try {
-    const { name, url, description, order_index } = await c.req.json();
+    const { name, url, description, order_index, required_role } = await c.req.json();
 
-    const result = db.prepare('INSERT INTO systems (name, url, description, order_index) VALUES (?, ?, ?, ?)').run(name, url, description || null, order_index || 0);
+    // required_roleの検証
+    if (required_role && !['admin', 'leader', 'crew'].includes(required_role)) {
+      return c.json({ error: '無効な必要権限です' }, 400);
+    }
+
+    const result = db.prepare('INSERT INTO systems (name, url, description, order_index, required_role) VALUES (?, ?, ?, ?, ?)').run(name, url, description || null, order_index || 0, required_role || 'crew');
 
     return c.json({ success: true, systemId: result.lastInsertRowid });
   } catch (error) {
@@ -722,13 +899,18 @@ app.post('/api/admin/systems', authMiddleware, adminMiddleware, async (c) => {
   }
 });
 
-// API: システムリンク更新（管理者のみ）
-app.put('/api/admin/systems/:id', authMiddleware, adminMiddleware, async (c) => {
+// API: システムリンク更新（リーダー以上）
+app.put('/api/admin/systems/:id', authMiddleware, leaderMiddleware, async (c) => {
   try {
     const systemId = c.req.param('id');
-    const { name, url, description, order_index } = await c.req.json();
+    const { name, url, description, order_index, required_role } = await c.req.json();
 
-    db.prepare('UPDATE systems SET name = ?, url = ?, description = ?, order_index = ? WHERE id = ?').run(name, url, description || null, order_index || 0, systemId);
+    // required_roleの検証
+    if (required_role && !['admin', 'leader', 'crew'].includes(required_role)) {
+      return c.json({ error: '無効な必要権限です' }, 400);
+    }
+
+    db.prepare('UPDATE systems SET name = ?, url = ?, description = ?, order_index = ?, required_role = ? WHERE id = ?').run(name, url, description || null, order_index || 0, required_role || 'crew', systemId);
 
     return c.json({ success: true });
   } catch (error) {
@@ -738,7 +920,7 @@ app.put('/api/admin/systems/:id', authMiddleware, adminMiddleware, async (c) => 
 });
 
 // API: システムリンク削除（管理者のみ）
-app.delete('/api/admin/systems/:id', authMiddleware, adminMiddleware, async (c) => {
+app.delete('/api/admin/systems/:id', authMiddleware, leaderMiddleware, async (c) => {
   try {
     const systemId = c.req.param('id');
     db.prepare('DELETE FROM systems WHERE id = ?').run(systemId);
