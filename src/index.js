@@ -368,7 +368,7 @@ app.get('/', authMiddleware, (c) => {
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 ${systems.map(sys => `
-                    <a href="${sys.url}" target="_blank" 
+                    <a href="#" onclick="openSystemWithSSO('${sys.url}', '${sys.name}'); return false;" 
                        class="block bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white rounded-lg p-6 shadow-md transition duration-200 transform hover:scale-105">
                         <div class="flex items-center justify-between">
                             <div class="flex-1">
@@ -399,6 +399,33 @@ app.get('/', authMiddleware, (c) => {
             </div>
         </div>
     </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <script>
+        axios.defaults.withCredentials = true;
+        
+        async function openSystemWithSSO(targetUrl, systemName) {
+            try {
+                console.log(\`🔑 SSO トークン取得中: \${systemName}\`);
+                
+                // SSOトークンを生成
+                const response = await axios.post('/api/generate-sso-token', {
+                    targetUrl: targetUrl
+                });
+                
+                if (response.data.success) {
+                    const token = response.data.token;
+                    // トークン付きURLで新しいタブを開く
+                    const urlWithToken = \`\${targetUrl}?auth_token=\${token}\`;
+                    window.open(urlWithToken, '_blank');
+                    console.log(\`✅ \${systemName} を開きました\`);
+                }
+            } catch (error) {
+                console.error('SSO エラー:', error);
+                alert('システムへのアクセス中にエラーが発生しました');
+            }
+        }
+    </script>
 </body>
 </html>
   `);
@@ -806,6 +833,34 @@ app.post('/api/change-password', authMiddleware, async (c) => {
   } catch (error) {
     console.error('❌ Password change error:', error);
     return c.json({ error: 'パスワード変更中にエラーが発生しました' }, 500);
+  }
+});
+
+// API: SSO用トークン生成
+app.post('/api/generate-sso-token', authMiddleware, async (c) => {
+  try {
+    const user = c.get('user');
+    const { targetUrl } = await c.req.json();
+
+    // SSO用の一時トークンを生成（有効期限5分）
+    const ssoToken = jwt.sign(
+      {
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+        targetUrl: targetUrl,
+        type: 'sso'
+      },
+      JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+
+    console.log(`🔑 SSO トークン生成: ${user.username} → ${targetUrl}`);
+
+    return c.json({ success: true, token: ssoToken });
+  } catch (error) {
+    console.error('❌ SSO token generation error:', error);
+    return c.json({ error: 'トークン生成中にエラーが発生しました' }, 500);
   }
 });
 
