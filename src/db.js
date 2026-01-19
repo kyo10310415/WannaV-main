@@ -2,11 +2,19 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { mkdirSync, existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const dbPath = join(__dirname, '../data/wannav.db');
+// dataディレクトリが存在しない場合は作成
+const dataDir = join(__dirname, '../data');
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
+  console.log('✅ dataディレクトリを作成しました');
+}
+
+const dbPath = join(dataDir, 'wannav.db');
 const db = new Database(dbPath);
 
 // テーブルの作成
