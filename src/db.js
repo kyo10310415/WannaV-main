@@ -7,14 +7,15 @@ import { mkdirSync, existsSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// dataディレクトリが存在しない場合は作成
-const dataDir = join(__dirname, '../data');
+// Render Disk利用時は /data を使用、それ以外は ./data
+const dataDir = existsSync('/data') ? '/data' : join(__dirname, '../data');
 if (!existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
   console.log('✅ dataディレクトリを作成しました');
 }
 
 const dbPath = join(dataDir, 'wannav.db');
+console.log(`📁 データベースパス: ${dbPath}`);
 const db = new Database(dbPath);
 
 // テーブルの作成
