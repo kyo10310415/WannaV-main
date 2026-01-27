@@ -52,7 +52,7 @@ function ssoAuthMiddleware(req, res, next) {
       res.cookie('wannav_sso', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7日間
+        maxAge: 60 * 60 * 1000, // 1時間
         sameSite: 'lax'
       });
       

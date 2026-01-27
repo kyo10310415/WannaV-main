@@ -852,7 +852,7 @@ app.post('/api/generate-sso-token', authMiddleware, async (c) => {
         type: 'sso'
       },
       JWT_SECRET,
-      { expiresIn: '5m' }
+      { expiresIn: '1h' }  // 1時間に延長
     );
 
     console.log(`🔑 SSO トークン生成: ${user.username} → ${targetUrl}`);
