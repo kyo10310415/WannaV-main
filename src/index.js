@@ -415,9 +415,17 @@ app.get('/', authMiddleware, (c) => {
                 
                 if (response.data.success) {
                     const token = response.data.token;
-                    // トークン付きURLで新しいタブを開く
+                    // トークン付きURLで遷移（スマホ対応）
                     const urlWithToken = \`\${targetUrl}?auth_token=\${token}\`;
-                    window.open(urlWithToken, '_blank');
+                    
+                    // デスクトップ: 新しいタブで開く、スマホ: 同じタブで遷移
+                    if (window.innerWidth > 768) {
+                        // デスクトップ
+                        window.open(urlWithToken, '_blank');
+                    } else {
+                        // スマホ
+                        window.location.href = urlWithToken;
+                    }
                     console.log(\`✅ \${systemName} を開きました\`);
                 }
             } catch (error) {
