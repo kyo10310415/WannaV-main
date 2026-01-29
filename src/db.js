@@ -122,7 +122,8 @@ if (checkSystems.count === 0) {
     { name: 'WannaV 延長管理システム', url: 'https://extended-management.onrender.com/', order_index: 1, required_role: 'crew' },
     { name: 'WannaV わなみさん使用ログ分析', url: 'https://wanamisan-monitor.onrender.com/', order_index: 2, required_role: 'leader' },
     { name: 'WannaV成長度リザルトシステム', url: 'https://vtuber-school-evaluation.onrender.com/', order_index: 3, required_role: 'crew' },
-    { name: '発話比率算出AI', url: 'https://speech-ratio-evaluation-ai.onrender.com/', order_index: 4, required_role: 'admin' }
+    { name: '発話比率算出AI', url: 'https://speech-ratio-evaluation-ai.onrender.com/', order_index: 4, required_role: 'admin' },
+    { name: '特典送付システム', url: 'https://wannav-benefit-system.onrender.com/', order_index: 5, required_role: 'admin' }
   ];
   
   const stmt = db.prepare('INSERT INTO systems (name, url, order_index, required_role) VALUES (?, ?, ?, ?)');
