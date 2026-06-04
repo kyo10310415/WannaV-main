@@ -518,6 +518,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                                     <button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
                                         <i class="fas fa-key"></i> パスワード変更
                                     </button>
+                                    ${user.role === 'admin' && u.username !== 'admin' ? `<button onclick="changeRole(${u.id}, '${u.username}', '${u.role}')" class="text-purple-600 hover:text-purple-900"><i class="fas fa-user-shield"></i> 権限変更</button>` : ''}
                                     ${u.username !== 'admin' ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
                                 </td>
                             </tr>
@@ -650,6 +651,68 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
             } catch (error) {
                 alert('エラー: ' + (error.response?.data?.error || 'ユーザーの削除に失敗しました'));
             }
+        }
+
+        function changeRole(userId, username, currentRole) {
+            const roleLabels = { admin: '管理者', leader: 'リーダー', crew: 'クルー' };
+            const content = \`
+                <div class="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-700">
+                    <i class="fas fa-user mr-2"></i>対象ユーザー: <strong>\${username}</strong>
+                    <span class="ml-2 px-2 py-0.5 rounded text-xs font-semibold \${currentRole === 'admin' ? 'bg-purple-100 text-purple-800' : currentRole === 'leader' ? 'bg-blue-100 text-blue-800' : 'bg-gray-200 text-gray-700'}">
+                        現在: \${roleLabels[currentRole]}
+                    </span>
+                </div>
+                <form id="changeRoleForm" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 font-semibold mb-2">
+                            <i class="fas fa-user-shield mr-2 text-purple-600"></i>新しい権限
+                        </label>
+                        <div class="space-y-2">
+                            <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-purple-50 transition \${currentRole === 'admin' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}">
+                                <input type="radio" name="role" value="admin" \${currentRole === 'admin' ? 'checked' : ''} class="accent-purple-600">
+                                <span class="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs font-semibold">管理者</span>
+                                <span class="text-sm text-gray-600">全機能 + 権限変更が可能</span>
+                            </label>
+                            <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition \${currentRole === 'leader' ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}">
+                                <input type="radio" name="role" value="leader" \${currentRole === 'leader' ? 'checked' : ''} class="accent-blue-600">
+                                <span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-semibold">リーダー</span>
+                                <span class="text-sm text-gray-600">ユーザー管理 + リンク管理が可能</span>
+                            </label>
+                            <label class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition \${currentRole === 'crew' ? 'border-gray-400 bg-gray-50' : 'border-gray-200'}">
+                                <input type="radio" name="role" value="crew" \${currentRole === 'crew' ? 'checked' : ''} class="accent-gray-600">
+                                <span class="px-2 py-0.5 bg-gray-200 text-gray-700 rounded text-xs font-semibold">クルー</span>
+                                <span class="text-sm text-gray-600">ダッシュボード閲覧のみ</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="flex space-x-3 pt-2">
+                        <button type="submit" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-semibold transition">
+                            <i class="fas fa-check mr-2"></i>変更する
+                        </button>
+                        <button type="button" onclick="hideModal()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold transition">
+                            キャンセル
+                        </button>
+                    </div>
+                </form>
+            \`;
+            showModal('権限変更', content);
+
+            document.getElementById('changeRoleForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const newRole = e.target.querySelector('input[name="role"]:checked')?.value;
+                if (!newRole) return;
+                if (newRole === currentRole) {
+                    alert('現在と同じ権限です。別の権限を選択してください。');
+                    return;
+                }
+                try {
+                    await axios.put(\`/api/admin/users/\${userId}/role\`, { role: newRole });
+                    alert(\`\${username} の権限を「\${roleLabels[newRole]}」に変更しました\`);
+                    location.reload();
+                } catch (error) {
+                    alert('エラー: ' + (error.response?.data?.error || '権限変更に失敗しました'));
+                }
+            });
         }
 
         function showAddSystemModal() {
@@ -940,6 +1003,48 @@ app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, async (c) =
   } catch (error) {
     console.error('Delete user error:', error);
     return c.json({ error: 'ユーザー削除中にエラーが発生しました' }, 500);
+  }
+});
+
+// API: ユーザー権限変更（管理者のみ）
+app.put('/api/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) => {
+  try {
+    const userId = c.req.param('id');
+    const { role } = await c.req.json();
+
+    // roleの検証
+    if (!['admin', 'leader', 'crew'].includes(role)) {
+      return c.json({ error: '無効な権限です' }, 400);
+    }
+
+    // 対象ユーザーを確認
+    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
+    if (!targetUser) {
+      return c.json({ error: 'ユーザーが見つかりません' }, 404);
+    }
+
+    // adminユーザー自身の権限は変更不可
+    if (targetUser.username === 'admin') {
+      return c.json({ error: 'デフォルト管理者の権限は変更できません' }, 400);
+    }
+
+    // 自分自身の権限変更は不可
+    const currentUser = c.get('user');
+    if (String(currentUser.id) === String(userId)) {
+      return c.json({ error: '自分自身の権限は変更できません' }, 400);
+    }
+
+    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, userId);
+
+    // 権限変更後は既存セッションを無効化（再ログインを促す）
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+
+    console.log(`✅ ${currentUser.username} が ${targetUser.username} の権限を「${role}」に変更しました`);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Change role error:', error);
+    return c.json({ error: '権限変更中にエラーが発生しました' }, 500);
   }
 });
 
