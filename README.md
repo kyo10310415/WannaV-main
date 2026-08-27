@@ -45,6 +45,9 @@ WannaV関連システムへのアクセスを一元管理するダッシュボ�
 4. **発話比率算出AI**  
    https://speech-ratio-evaluation-ai.onrender.com/
 
+5. **AI回答ソース管理**（管理者のみ）
+   https://discord-bot-wannami-v2.onrender.com/admin/sources
+
 ## 🚀 デプロイ方法
 
 ### Renderへのデプロイ

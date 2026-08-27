@@ -123,12 +123,19 @@ if (checkSystems.count === 0) {
     { name: 'WannaV わなみさん使用ログ分析', url: 'https://wanamisan-monitor.onrender.com/', order_index: 2, required_role: 'leader' },
     { name: 'WannaV成長度リザルトシステム', url: 'https://vtuber-school-evaluation.onrender.com/', order_index: 3, required_role: 'crew' },
     { name: '発話比率算出AI', url: 'https://speech-ratio-evaluation-ai.onrender.com/', order_index: 4, required_role: 'admin' },
-    { name: '特典送付システム', url: 'https://wannav-benefit-system.onrender.com/', order_index: 5, required_role: 'admin' }
+    { name: '特典送付システム', url: 'https://wannav-benefit-system.onrender.com/', order_index: 5, required_role: 'admin' },
+    {
+      name: 'AI回答ソース管理',
+      url: process.env.AI_SOURCE_ADMIN_URL || 'https://discord-bot-wannami-v2.onrender.com/admin/sources',
+      description: 'AI回答に使用するナレッジソースを登録・編集します',
+      order_index: 6,
+      required_role: 'admin'
+    }
   ];
   
-  const stmt = db.prepare('INSERT INTO systems (name, url, order_index, required_role) VALUES (?, ?, ?, ?)');
+  const stmt = db.prepare('INSERT INTO systems (name, url, description, order_index, required_role) VALUES (?, ?, ?, ?, ?)');
   systems.forEach(sys => {
-    stmt.run(sys.name, sys.url, sys.order_index, sys.required_role);
+    stmt.run(sys.name, sys.url, sys.description || null, sys.order_index, sys.required_role);
   });
   console.log('✅ デフォルトシステムリンクを追加しました');
 } else {
@@ -142,6 +149,37 @@ if (checkSystems.count === 0) {
     });
     console.log('✅ システムリンクのrequired_role設定が完了しました');
   }
+}
+
+// 既存の本番DBにもAI回答ソース管理へのSSOリンクを反映する。
+// systemsテーブルが空でない環境でも、アプリ起動時に一度だけ追加される。
+const aiSourceAdminSystem = {
+  name: 'AI回答ソース管理',
+  url: process.env.AI_SOURCE_ADMIN_URL || 'https://discord-bot-wannami-v2.onrender.com/admin/sources',
+  description: 'AI回答に使用するナレッジソースを登録・編集します',
+  requiredRole: 'admin'
+};
+
+const existingAiSourceSystem = db.prepare('SELECT id FROM systems WHERE name = ?').get(aiSourceAdminSystem.name);
+
+if (existingAiSourceSystem) {
+  db.prepare('UPDATE systems SET url = ?, description = ?, required_role = ? WHERE id = ?').run(
+    aiSourceAdminSystem.url,
+    aiSourceAdminSystem.description,
+    aiSourceAdminSystem.requiredRole,
+    existingAiSourceSystem.id
+  );
+  console.log('ℹ️  AI回答ソース管理リンクを更新しました');
+} else {
+  const nextOrder = db.prepare('SELECT COALESCE(MAX(order_index), 0) + 1 AS next_order FROM systems').get().next_order;
+  db.prepare('INSERT INTO systems (name, url, description, order_index, required_role) VALUES (?, ?, ?, ?, ?)').run(
+    aiSourceAdminSystem.name,
+    aiSourceAdminSystem.url,
+    aiSourceAdminSystem.description,
+    nextOrder,
+    aiSourceAdminSystem.requiredRole
+  );
+  console.log('✅ AI回答ソース管理リンクを追加しました');
 }
 
 export default db;
