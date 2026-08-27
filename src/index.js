@@ -38,8 +38,6 @@ app.use('/public/*', serveStatic({ root: './' }));
 // 認証ミドルウェア
 const authMiddleware = async (c, next) => {
   const cookieHeader = c.req.header('cookie') || '';
-  console.log(`🔍 認証チェック: Cookie Header = ${cookieHeader.substring(0, 100)}`);
-  
   const cookies = parse(cookieHeader);
   const token = cookies.auth_token;
   
@@ -875,7 +873,7 @@ app.post('/api/login', async (c) => {
     const cookieHeader = serialize('auth_token', token, cookieOptions);
     c.header('Set-Cookie', cookieHeader);
     
-    console.log(`🍪 Cookie設定: ${cookieHeader.substring(0, 100)}...`);
+    console.log('🍪 認証Cookie設定完了');
     console.log(`✅ ログイン成功: ${username}`);
     
     return c.json({ success: true, username: user.username });

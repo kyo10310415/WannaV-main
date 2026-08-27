@@ -70,7 +70,7 @@ Renderダッシュボードで以下を追加：
 
 ```bash
 Key: JWT_SECRET
-Value: 9aKGF-XGuWFEa*AnN$!Sg*B\-BYn}jb2
+Value: <Renderで設定した共有シークレット>
 
 Key: DASHBOARD_URL
 Value: https://wannav-main.onrender.com
