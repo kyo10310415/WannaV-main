@@ -8,6 +8,7 @@ import { JWT_SECRET } from './config.js';
 import { canManageUser } from './security.js';
 import { createUserManagementHandlers } from './user-management.js';
 import db from './db.js';
+import { createSsoHandler } from './sso.js';
 
 const app = new Hono();
 const PORT = process.env.PORT || 3000;
@@ -907,32 +908,7 @@ app.post('/api/change-password', authMiddleware, async (c) => {
 });
 
 // API: SSO用トークン生成
-app.post('/api/generate-sso-token', authMiddleware, async (c) => {
-  try {
-    const user = c.get('user');
-    const { targetUrl } = await c.req.json();
-
-    // SSO用の一時トークンを生成（有効期限5分）
-    const ssoToken = jwt.sign(
-      {
-        userId: user.id,
-        username: user.username,
-        role: user.role,
-        targetUrl: targetUrl,
-        type: 'sso'
-      },
-      JWT_SECRET,
-      { expiresIn: '1h' }  // 1時間に延長
-    );
-
-    console.log(`🔑 SSO トークン生成: ${user.username} → ${targetUrl}`);
-
-    return c.json({ success: true, token: ssoToken });
-  } catch (error) {
-    console.error('❌ SSO token generation error:', error);
-    return c.json({ error: 'トークン生成中にエラーが発生しました' }, 500);
-  }
-});
+app.post('/api/generate-sso-token', authMiddleware, createSsoHandler({ db, secret: JWT_SECRET }));
 
 // Account creation and changes share server-side privilege checks.
 const userManagement = createUserManagementHandlers({ db, bcrypt });
