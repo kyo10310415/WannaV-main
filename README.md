@@ -244,3 +244,6 @@ ISC
 既定管理者の削除禁止は維持します。管理画面の作成候補とパスワード・削除ボタンにも同じ制限を適用します。leaderによる同権限leaderの作成・変更もできなくなるため、必要な操作はadminへ依頼してください。パスワード変更・削除では既存どおり対象セッションを失効させます。
 
 `npm test`は外部API・実DB・HTTP待受けを使わない権限テストです。DBとbcryptをmock化した本番用ハンドラーを検証します。新規依存・DBschema変更はありません。既存の共通初期パスワード方式、SSO発行先の権限検査（SEC-011）などは今回の対象外で、追加対策が必要です。
+
+### SSO宛先・権限検証（SEC-011）
+SSO発行APIは登録済みsystemのrequired_roleを検査し、未登録URL・不正ロール・権限不足を拒否します。既存のtargetUrl完全一致指定を維持し、数値systemId指定にも対応します。登録URLはHTTPSかつ資格情報・query・fragmentを含めないでください。JWTはHS256、issuer=https://wannav-main.onrender.com、audience=登録URLのoriginを付与します。受信側もissuer/audience/roleを検証する必要があります。特典システムの受信側修正と設定は別PRです。既存SSO Cookieは受信側の切替時に再ログインが必要です。

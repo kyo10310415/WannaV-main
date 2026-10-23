@@ -5,6 +5,7 @@ import { Script, runInNewContext } from 'node:vm';
 import { Hono } from 'hono';
 import { canManageUser } from '../src/security.js';
 import { createUserManagementHandlers } from '../src/user-management.js';
+import { createSsoHandler } from '../src/sso.js';
 
 // Exercise the real route/template without loading native SQLite or listening.
 function renderApp(role) {
@@ -13,7 +14,7 @@ function renderApp(role) {
     id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01',
   }));
   const context = {
-    Hono, canManageUser, createUserManagementHandlers,
+    Hono, canManageUser, createUserManagementHandlers, createSsoHandler,
     serve() {}, serveStatic: () => async (_c, next) => next(),
     bcrypt: {}, jwt: { verify: () => ({ userId: actor.id }) },
     parse: () => ({ auth_token: 'test-only-cookie' }), serialize: () => '',
