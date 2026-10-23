@@ -8,9 +8,13 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "init-db": "node src/init-db.js",
-    "test": "curl http://localhost:3000"
+    "test": "node --test tests/*.test.js"
   },
-  "keywords": ["wannav", "dashboard", "authentication"],
+  "keywords": [
+    "wannav",
+    "dashboard",
+    "authentication"
+  ],
   "author": "kyo10310415",
   "license": "ISC",
   "dependencies": {

@@ -4,10 +4,12 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { parse, serialize } from 'cookie';
+import { JWT_SECRET } from './config.js';
+import { canManageUser } from './security.js';
+import { createUserManagementHandlers } from './user-management.js';
 import db from './db.js';
 
 const app = new Hono();
-const JWT_SECRET = process.env.JWT_SECRET || 'wannav-secret-key-change-in-production';
 const PORT = process.env.PORT || 3000;
 
 // ロール権限レベル定義
@@ -513,11 +515,11 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${new Date(u.created_at).toLocaleString('ja-JP')}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                                    <button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
+                                    ${canManageUser(user, u) ? `<button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
                                         <i class="fas fa-key"></i> パスワード変更
-                                    </button>
+                                    </button>` : ''}
                                     ${user.role === 'admin' && u.username !== 'admin' ? `<button onclick="changeRole(${u.id}, '${u.username}', '${u.role}')" class="text-purple-600 hover:text-purple-900"><i class="fas fa-user-shield"></i> 権限変更</button>` : ''}
-                                    ${u.username !== 'admin' ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
+                                    ${u.username !== 'admin' && canManageUser(user, u) ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
                                 </td>
                             </tr>
                         `).join('')}
@@ -593,8 +595,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                         <label class="block text-gray-700 font-semibold mb-2">権限</label>
                         <select name="role" required class="w-full px-4 py-2 border rounded-lg">
                             <option value="crew">クルー（一般）</option>
-                            <option value="leader">リーダー（上位）</option>
-                            <option value="admin">管理者（最上位）</option>
+                            ${user.role === 'admin' ? '<option value="leader">リーダー（上位）</option><option value="admin">管理者（最上位）</option>' : ''}
                         </select>
                     </div>
                     <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
@@ -933,76 +934,11 @@ app.post('/api/generate-sso-token', authMiddleware, async (c) => {
   }
 });
 
-// API: ユーザー追加（リーダー以上）
-app.post('/api/admin/users', authMiddleware, leaderMiddleware, async (c) => {
-  try {
-    const { username, role } = await c.req.json();
-    const password = '1111'; // 初期パスワードは1111
-
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-    if (existing) {
-      return c.json({ error: 'このユーザー名は既に使用されています' }, 400);
-    }
-
-    // roleの検証
-    if (!['admin', 'leader', 'crew'].includes(role)) {
-      return c.json({ error: '無効な権限です' }, 400);
-    }
-
-    const hashedPassword = bcrypt.hashSync(password, 10);
-    // admin以外は初回パスワード変更を要求
-    const mustChangePassword = username !== 'admin' ? 1 : 0;
-    
-    const result = db.prepare('INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, ?)').run(username, hashedPassword, role, mustChangePassword);
-
-    console.log(`✅ 新規ユーザー作成: ${username} (role: ${role}, 初期パスワード: 1111)`);
-
-    return c.json({ success: true, userId: result.lastInsertRowid });
-  } catch (error) {
-    console.error('Add user error:', error);
-    return c.json({ error: 'ユーザー追加中にエラーが発生しました' }, 500);
-  }
-});
-
-// API: パスワード変更（管理者のみ）
-app.put('/api/admin/users/:id/password', authMiddleware, leaderMiddleware, async (c) => {
-  try {
-    const userId = c.req.param('id');
-    const { password } = await c.req.json();
-
-    const hashedPassword = bcrypt.hashSync(password, 10);
-    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, userId);
-
-    // そのユーザーの全セッションを削除（再ログインを強制）
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
-
-    return c.json({ success: true });
-  } catch (error) {
-    console.error('Change password error:', error);
-    return c.json({ error: 'パスワード変更中にエラーが発生しました' }, 500);
-  }
-});
-
-// API: ユーザー削除（管理者のみ）
-app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, async (c) => {
-  try {
-    const userId = c.req.param('id');
-
-    // adminユーザーは削除不可
-    const user = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
-    if (user && user.username === 'admin') {
-      return c.json({ error: 'デフォルト管理者は削除できません' }, 400);
-    }
-
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-
-    return c.json({ success: true });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    return c.json({ error: 'ユーザー削除中にエラーが発生しました' }, 500);
-  }
-});
+// Account creation and changes share server-side privilege checks.
+const userManagement = createUserManagementHandlers({ db, bcrypt });
+app.post('/api/admin/users', authMiddleware, leaderMiddleware, userManagement.create);
+app.put('/api/admin/users/:id/password', authMiddleware, leaderMiddleware, userManagement.password);
+app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, userManagement.remove);
 
 // API: ユーザー権限変更（管理者のみ）
 app.put('/api/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) => {
