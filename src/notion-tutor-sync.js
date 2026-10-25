@@ -22,6 +22,12 @@ function id(value) {
 
 function propertyText(property) {
   if (!property) throw new TutorSyncError('schema');
+  if (property.type === 'people') {
+    if (!Array.isArray(property.people) || property.people.length !== 1 || property.has_more
+      || property.people[0].type !== 'person' || !property.people[0].id
+      || typeof property.people[0].name !== 'string') throw new TutorSyncError('invalid_person');
+    return property.people[0].name;
+  }
   if (property.type === 'email') return property.email;
   if (['title', 'rich_text'].includes(property.type) && Array.isArray(property[property.type])) {
     return property[property.type].map(part => part.plain_text ?? part.text?.content ?? '').join('');
@@ -31,8 +37,7 @@ function propertyText(property) {
   throw new TutorSyncError('schema');
 }
 
-// No roster download or persistent positive cache: every new extension SSO
-// resolves exactly this account's email against the authoritative Notion data.
+// No persistent positive cache: every new extension SSO revalidates identity.
 export function createNotionTutorResolver({ env = process.env, fetchImplementation = globalThis.fetch } = {}) {
   const inFlight = new Map();
   let metadata;
@@ -65,7 +70,7 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
     if (!email) throw new TutorSyncError('schema_email_missing');
     if (!name) throw new TutorSyncError('schema_tutor_missing');
     if (!['email', 'rich_text', 'title'].includes(email.type)) throw new TutorSyncError('schema_email_type');
-    if (!['title', 'rich_text', 'select', 'formula'].includes(name.type)) throw new TutorSyncError('schema_tutor_type');
+    if (!['title', 'rich_text', 'select', 'formula', 'people'].includes(name.type)) throw new TutorSyncError('schema_tutor_type');
     if (typeof email.id !== 'string' || typeof name.id !== 'string') throw new TutorSyncError('schema');
     metadata = { sourceId, email, name, expires: Date.now() + 60000 };
     return metadata;
@@ -94,6 +99,39 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
       const rawName = propertyText(get(name, NAME_PROPERTY));
       const parsed = parseTutorName(rawName);
       if (!parsed.valid || !parsed.value || parsed.value !== rawName) throw new TutorSyncError('invalid_name');
+      if (name.type === 'people') {
+        // People filters accept IDs, not display names. Check all projected tutor
+        // values so different Notion users with the same name cannot share access.
+        let cursor, matches = 0;
+        const seenCursors = new Set();
+        const personId = get(name, NAME_PROPERTY).people[0].id;
+        for (let page = 0; page < 10; page++) {
+          const batch = await request(`/data_sources/${id(sourceId)}/query?${query}`, {
+            page_size: 100, ...(cursor ? { start_cursor: cursor } : {}),
+          });
+          if (!Array.isArray(batch.results)) throw new TutorSyncError('upstream');
+          for (const candidate of batch.results) {
+            if (candidate.archived || candidate.in_trash) continue;
+            const property = get(name, NAME_PROPERTY, candidate.properties || {});
+            if (property?.type !== 'people' || !Array.isArray(property.people) || property.has_more) throw new TutorSyncError('invalid_person');
+            for (const person of property.people) {
+              if (person.type !== 'person' || !person.id || typeof person.name !== 'string') throw new TutorSyncError('invalid_person');
+              if (person.name !== parsed.value) continue;
+              if (++matches !== 1 || candidate.id !== row.id || person.id !== personId
+                || property.people.length !== 1
+                || propertyText(get(email, EMAIL_PROPERTY, candidate.properties || {})) !== username) throw new TutorSyncError('ambiguous_name');
+            }
+          }
+          if (!batch.has_more) {
+            if (matches !== 1) throw new TutorSyncError('ambiguous_name');
+            return parsed.value;
+          }
+          if (typeof batch.next_cursor !== 'string' || !batch.next_cursor || seenCursors.has(batch.next_cursor)) throw new TutorSyncError('upstream');
+          cursor = batch.next_cursor;
+          seenCursors.add(cursor);
+        }
+        throw new TutorSyncError('roster_limit');
+      }
       const nameFilter = name.type === 'formula' ? { formula: { string: { equals: parsed.value } } }
         : { [name.type]: { equals: parsed.value } };
       const sameName = await request(`/data_sources/${id(sourceId)}/query?${query}`, {
