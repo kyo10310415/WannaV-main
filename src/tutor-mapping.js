@@ -4,6 +4,12 @@ export function ensureTutorNameColumn(db) {
   }
 }
 
+export function ensureNotionTutorApprovalColumn(db) {
+  if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'notion_tutor_approved')) {
+    db.exec('ALTER TABLE users ADD COLUMN notion_tutor_approved INTEGER NOT NULL DEFAULT 0 CHECK (notion_tutor_approved IN (0, 1))');
+  }
+}
+
 export function parseTutorName(value) {
   if (value === null) return { valid: true, value: null };
   if (typeof value !== 'string' || /[\p{Cc}\p{Cf},，、;]/u.test(value)) return { valid: false };
