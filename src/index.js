@@ -9,11 +9,9 @@ import { canManageUser } from './security.js';
 import { createUserManagementHandlers } from './user-management.js';
 import db from './db.js';
 import { createSsoHandler } from './sso.js';
-import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError } from './notion-tutor-sync.js';
 
 const app = new Hono();
 const PORT = process.env.PORT || 3000;
-const resolveTutorName = createNotionTutorResolver();
 
 // ロール権限レベル定義
 const ROLE_LEVELS = {
@@ -445,7 +443,7 @@ app.get('/', authMiddleware, (c) => {
 // 管理画面
 app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
   const user = c.get('user');
-  const users = db.prepare('SELECT id, username, role, tutor_name, notion_tutor_approved, must_change_password, created_at FROM users').all();
+  const users = db.prepare('SELECT id, username, role, must_change_password, created_at FROM users').all();
   const systems = db.prepare('SELECT * FROM systems ORDER BY order_index ASC').all();
 
   return c.html(`
@@ -484,7 +482,6 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
             <h2 class="text-2xl font-bold text-gray-800 mb-4">
                 <i class="fas fa-users mr-2 text-purple-600"></i>ユーザー管理
             </h2>
-            ${user.role === 'admin' ? '<p class="text-sm text-gray-600 mb-4">担任Tutor名はNotionから取得します。初回承認後、crewが延長管理を開く際に自動同期します。<button onclick="checkTutorConnection()" class="text-blue-600 underline ml-2">Notion接続を確認</button></p>' : ''}
             <div class="mb-6">
                 <button onclick="showAddUserModal()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-200">
                     <i class="fas fa-plus mr-2"></i>新規ユーザー追加
@@ -521,7 +518,6 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                                     ${canManageUser(user, u) ? `<button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
                                         <i class="fas fa-key"></i> パスワード変更
                                     </button>` : ''}
-                                    ${user.role === 'admin' && u.role === 'crew' ? `<input id="tutor-name-${u.id}" aria-label="担任Tutor対応名" readonly value="${String(u.tutor_name || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}" class="border rounded px-2 py-1"><button onclick="checkTutorStatus(${u.id})" class="text-gray-600">照合のみ確認</button><button onclick="syncTutorName(${u.id})" class="text-blue-600">${u.notion_tutor_approved ? 'Notionから担当を同期' : '初回承認・Notion同期'}</button>${u.notion_tutor_approved ? `<button onclick="unlinkTutorName(${u.id})" class="text-gray-600">Notion連携を解除</button>` : ''}` : ''}
                                     ${user.role === 'admin' && u.username !== 'admin' ? `<button onclick="changeRole(${u.id}, '${u.username}', '${u.role}')" class="text-purple-600 hover:text-purple-900"><i class="fas fa-user-shield"></i> 権限変更</button>` : ''}
                                     ${u.username !== 'admin' && canManageUser(user, u) ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
                                 </td>
@@ -630,41 +626,6 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                     alert('エラー: ' + (error.response?.data?.error || 'ユーザーの追加に失敗しました'));
                 }
             });
-        }
-
-        async function checkTutorStatus(userId) {
-            try {
-                const response = await axios.get('/api/admin/users/' + userId + '/tutor/status');
-                alert(response.data.message);
-            } catch (error) {
-                const data = error.response?.data;
-                alert((data?.message || '照合できませんでした。時間をおいて再試行してください。') + (data?.remediationUrl ? '\\n確認するNotionの行: ' + data.remediationUrl : ''));
-            }
-        }
-
-        async function syncTutorName(userId) {
-            try {
-                const response = await axios.post('/api/admin/users/' + userId + '/tutor/sync', {}, { headers: { 'X-WannaV-Request': '1' } });
-                alert(response.data.matched ? 'Notionから担当を同期しました。延長管理を開き直してください。' : 'Notionに一致する担当者登録がありません。以前の対応は解除しました。');
-                window.location.reload();
-            } catch (error) {
-                alert('エラー: ' + (error.response?.data?.error || '保存に失敗しました'));
-            }
-        }
-
-        async function checkTutorConnection() {
-            try {
-                await axios.get('/api/admin/notion-tutors/status');
-                alert('Notionへの接続とメールアドレス・Notion名のプロパティを確認できました。');
-            } catch { alert('NotionのAPIキー・データベース接続・プロパティ名を確認してください。'); }
-        }
-
-        async function unlinkTutorName(userId) {
-            try {
-                await axios.delete('/api/admin/users/' + userId + '/tutor/sync', { headers: { 'X-WannaV-Request': '1' } });
-                alert('Notion連携を解除しました。既発行SSOは最大1時間後に失効します。');
-                window.location.reload();
-            } catch { alert('連携を解除できませんでした。'); }
         }
 
         async function changePassword(userId, username) {
@@ -946,20 +907,11 @@ app.post('/api/change-password', authMiddleware, async (c) => {
 });
 
 // API: SSO用トークン生成
-app.post('/api/generate-sso-token', authMiddleware, createSsoHandler({ db, secret: JWT_SECRET, resolveTutorName }));
+app.post('/api/generate-sso-token', authMiddleware, createSsoHandler({ db, secret: JWT_SECRET }));
 
 // Account creation and changes share server-side privilege checks.
 const userManagement = createUserManagementHandlers({ db, bcrypt });
 app.post('/api/admin/users', authMiddleware, leaderMiddleware, userManagement.create);
-app.put('/api/admin/users/:id/tutor', authMiddleware, adminMiddleware, c => c.json({ error: '担当者対応はNotionから同期してください。' }, 409));
-app.get('/api/admin/users/:id/tutor/status', authMiddleware, adminMiddleware, createTutorStatusHandler({ db, resolveTutorName }));
-app.post('/api/admin/users/:id/tutor/sync', authMiddleware, adminMiddleware, createTutorSyncHandler({ db, resolveTutorName }));
-app.delete('/api/admin/users/:id/tutor/sync', authMiddleware, adminMiddleware, createTutorUnlinkHandler({ db }));
-app.get('/api/admin/notion-tutors/status', authMiddleware, adminMiddleware, async c => {
-  c.header('Cache-Control', 'no-store');
-  try { return c.json(await resolveTutorName.checkConfiguration()); }
-  catch (error) { return c.json({ connected: false, reason: error instanceof TutorSyncError ? error.code : 'upstream', error: 'NotionのAPIキー・データベース接続・プロパティ名を確認してください。' }, 503); }
-});
 app.put('/api/admin/users/:id/password', authMiddleware, leaderMiddleware, userManagement.password);
 app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, userManagement.remove);
 

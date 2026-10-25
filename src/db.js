@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
-import { ensureTutorNameColumn, ensureNotionTutorApprovalColumn } from './tutor-mapping.js';
+import { ensureTutorNameColumn } from './tutor-mapping.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
@@ -51,7 +51,6 @@ db.exec(`
 `);
 
 ensureTutorNameColumn(db);
-ensureNotionTutorApprovalColumn(db);
 
 // 既存テーブルに新しいカラムを追加（マイグレーション）
 try {
