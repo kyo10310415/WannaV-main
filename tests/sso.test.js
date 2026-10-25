@@ -5,6 +5,19 @@ import jwt from 'jsonwebtoken';
 import { createSsoHandler } from '../src/sso.js';
 
 const secret = 'test-only-sso-key-'.repeat(4);
+test('crew can enter extension without email, approval, mapping or Notion dependency', async () => {
+  const app = new Hono();
+  app.use('*', async (c, next) => { c.set('user', { id: 7, username: 'plain-user', role: 'crew' }); await next(); });
+  app.post('/sso', createSsoHandler({ secret, db: { prepare: () => ({
+    all: () => [{ id: 1, url: 'https://extended-management.onrender.com/', required_role: 'crew' }],
+    get: () => assert.fail('tutor configuration must not be read'),
+  }) } }));
+  const response = await app.request('/sso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ systemId: 1, tutorName: 'forged' }) });
+  assert.equal(response.status, 200);
+  const claims = jwt.verify((await response.json()).token, secret, { audience: 'https://extended-management.onrender.com' });
+  assert.equal(claims.role, 'crew');
+  assert.equal(claims.tutorName, undefined);
+});
 function fixture(role, systems = [{ id: 1, url: 'https://service.example.test/', required_role: 'leader' }]) {
   const app = new Hono();
   app.use('*', async (c, next) => { c.set('user', { id: 7, username: 'test-user', role }); await next(); });
@@ -49,10 +62,10 @@ test('unknown required roles and insecure destinations fail closed', async () =>
 });
 
 
-test('crew SSO signs stored assignment and ignores request supplied tutor', async () => {
+test('crew SSO requires no tutor configuration and ignores request supplied tutor', async () => {
   const response = await fixture('crew', [{ id: 1, url: 'https://service.example.test/', required_role: 'crew' }])({ systemId: 1, tutorName: 'Forged Tutor' });
   const claims = jwt.verify((await response.json()).token, secret);
-  assert.equal(claims.tutorName, 'Assigned Tutor');
+  assert.equal(claims.tutorName, undefined);
 });
 
 test('unregistered mapping is null without guessing username', async () => {
@@ -60,5 +73,5 @@ test('unregistered mapping is null without guessing username', async () => {
   app.use('*', async (c, next) => { c.set('user', { id: 7, username: 'Matching-looking name', role: 'crew', tutorName: 'Untrusted context' }); await next(); });
   app.post('/sso', createSsoHandler({ secret, db: { prepare: () => ({ all: () => [{ id: 1, url: 'https://service.example.test/', required_role: 'crew' }], get: () => ({ tutor_name: null }) }) } }));
   const response = await app.request('/sso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ systemId: 1, tutorName: 'Forged' }) });
-  assert.equal(jwt.verify((await response.json()).token, secret).tutorName, null);
+  assert.equal(jwt.verify((await response.json()).token, secret).tutorName, undefined);
 });

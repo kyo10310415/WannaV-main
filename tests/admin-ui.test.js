@@ -6,7 +6,6 @@ import { Hono } from 'hono';
 import { canManageUser } from '../src/security.js';
 import { createUserManagementHandlers } from '../src/user-management.js';
 import { createSsoHandler } from '../src/sso.js';
-import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError } from '../src/notion-tutor-sync.js';
 
 // Exercise the real route/template without loading native SQLite or listening.
 function renderApp(role) {
@@ -15,7 +14,7 @@ function renderApp(role) {
     id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01', tutor_name: '"<script>unsafe</script>',
   }));
   const context = {
-    Hono, canManageUser, createUserManagementHandlers, createSsoHandler, createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError,
+    Hono, canManageUser, createUserManagementHandlers, createSsoHandler,
     serve() {}, serveStatic: () => async (_c, next) => next(),
     bcrypt: {}, jwt: { verify: () => ({ userId: actor.id }) },
     parse: () => ({ auth_token: 'test-only-cookie' }), serialize: () => '',
@@ -46,9 +45,9 @@ for (const role of ['admin', 'leader']) {
     assert.equal(html.includes('onclick="changePassword(3,'), role === 'admin');
     assert.equal(html.includes('onclick="deleteUser(2,'), role === 'admin');
     assert.equal(html.includes('onclick="deleteUser(3,'), role === 'admin');
-    assert.equal(html.includes('id="tutor-name-4"'), role === 'admin');
-    assert.equal(html.includes('onclick="syncTutorName(4)"'), role === 'admin');
-    assert.equal(html.includes('aria-label="担任Tutor対応名" readonly'), role === 'admin');
+    assert.equal(html.includes('id="tutor-name-4"'), false);
+    assert.equal(html.includes('onclick="syncTutorName(4)"'), false);
+    assert.equal(html.includes('aria-label="担任Tutor対応名" readonly'), false);
     assert.equal(html.includes('value=""<script>unsafe'), false);
     assert.ok(html.includes('onclick="changePassword(4,'));
     assert.ok(html.includes('onclick="deleteUser(4,'));
