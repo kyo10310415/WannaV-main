@@ -637,7 +637,8 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                 const response = await axios.get('/api/admin/users/' + userId + '/tutor/status');
                 alert(response.data.message);
             } catch (error) {
-                alert(error.response?.data?.message || '照合できませんでした。時間をおいて再試行してください。');
+                const data = error.response?.data;
+                alert((data?.message || '照合できませんでした。時間をおいて再試行してください。') + (data?.remediationUrl ? '\\n確認するNotionの行: ' + data.remediationUrl : ''));
             }
         }
 

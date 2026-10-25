@@ -41,7 +41,7 @@ function fixture({ result = { results: [row()], has_more: false }, nameResult, r
     const body = options.body && JSON.parse(options.body);
     const isNameQuery = body?.filter?.property === 'name-id';
     const data = url.includes('/users/') ? userProfiles[url.split('/').at(-1)] || {} : url.includes('/query?') ? (body && !body.filter && roster ? roster(body) : isNameQuery && nameResult ? nameResult : result) : url.includes('/data_sources/') ? schema : database;
-    return new Response(JSON.stringify(data), { status: 200 });
+    return new Response(JSON.stringify(data), { status: typeof data === 'number' ? data : 200 });
   } });
   return { resolve, calls };
 }
@@ -129,6 +129,22 @@ test('partial unrelated profiles are retrieved transiently and name collisions s
     else await assert.rejects(f.resolve(email), e => e.code === 'ambiguous_name');
     assert.equal(f.calls.filter(c => c.url.pathname.includes('/users/')).length, 1);
   }
+});
+
+test('unavailable user identifies a validated roster row without exposing profile data', async () => {
+  const target = peopleRow();
+  const pageId = 'abcdefab123412341234abcdefabcdef';
+  const partial = peopleRow('private@example.invalid', 'Private Tutor', sourceId, pageId);
+  delete partial.properties['Notion名'].people[0].name;
+  const f = fixture({ schema: peopleSchema, result: { results: [target] },
+    roster: () => ({ results: [target, partial] }), userProfiles: { [sourceId]: 404 } });
+  await assert.rejects(f.resolve(email), e => {
+    assert.equal(e.code, 'profile_not_found');
+    assert.equal(e.remediationUrl, 'https://www.notion.so/' + pageId);
+    assert.equal(e.message.includes('private@example.invalid'), false);
+    assert.equal(e.message.includes('Private Tutor'), false);
+    return true;
+  });
 });
 
 test('an unrelated named bot does not block a person, but a same-name bot fails closed', async () => {
