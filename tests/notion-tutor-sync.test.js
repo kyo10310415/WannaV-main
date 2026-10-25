@@ -11,6 +11,21 @@ import { DatabaseSync } from 'node:sqlite';
 const sourceId = '123456781234123412341234567890ab';
 const email = 'fixture@example.invalid';
 const source = { properties: { 'メールアドレス': { id: 'email-id', type: 'email' }, 'Notion名': { id: 'name-id', type: 'rich_text' } } };
+test('schema diagnostics identify fixed configuration categories without querying people', async () => {
+  for (const [property, type, code] of [
+    ['メールアドレス', null, 'schema_email_missing'],
+    ['Notion名', null, 'schema_tutor_missing'],
+    ['メールアドレス', 'relation', 'schema_email_type'],
+    ['Notion名', 'people', 'schema_tutor_type'],
+  ]) {
+    const schema = structuredClone(source);
+    if (type) schema.properties[property].type = type;
+    else delete schema.properties[property];
+    const f = fixture({ schema });
+    await assert.rejects(f.resolve.checkConfiguration(), error => error.code === code);
+    assert.equal(f.calls.some(call => call.url.pathname.endsWith('/query')), false);
+  }
+});
 const row = (address = email, name = 'Fixture Tutor') => ({ id: 'fixture-page', properties: {
   'メールアドレス': { id: 'email-id', type: 'email', email: address },
   'Notion名': { id: 'name-id', type: 'rich_text', rich_text: [{ plain_text: name }] },
@@ -72,7 +87,7 @@ test('supports text email properties and title tutor names without fuzzy matchin
 test('bad configuration, ambiguous sources and invalid schema do not select arbitrary grants', async () => {
   await assert.rejects(fixture({ env: { NOTION_API_KEY: '' } }).resolve(email), error => error.code === 'configuration');
   await assert.rejects(fixture({ database: { data_sources: [{ id: sourceId }, { id: sourceId }] } }).resolve(email), error => error.code === 'configuration');
-  await assert.rejects(fixture({ schema: { properties: {} } }).resolve(email), error => error.code === 'schema');
+  await assert.rejects(fixture({ schema: { properties: {} } }).resolve(email), error => error.code === 'schema_email_missing');
   const f = fixture();
   await assert.rejects(f.resolve('not-an-email'), error => error.code === 'account_email');
   assert.equal(f.calls.length, 0);

@@ -62,9 +62,11 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
     const source = await request(`/data_sources/${id(sourceId)}`);
     const email = source.properties?.[EMAIL_PROPERTY];
     const name = source.properties?.[NAME_PROPERTY];
-    if (!email || !['email', 'rich_text', 'title'].includes(email.type)
-      || !name || !['title', 'rich_text', 'select', 'formula'].includes(name.type)
-      || typeof email.id !== 'string' || typeof name.id !== 'string') throw new TutorSyncError('schema');
+    if (!email) throw new TutorSyncError('schema_email_missing');
+    if (!name) throw new TutorSyncError('schema_tutor_missing');
+    if (!['email', 'rich_text', 'title'].includes(email.type)) throw new TutorSyncError('schema_email_type');
+    if (!['title', 'rich_text', 'select', 'formula'].includes(name.type)) throw new TutorSyncError('schema_tutor_type');
+    if (typeof email.id !== 'string' || typeof name.id !== 'string') throw new TutorSyncError('schema');
     metadata = { sourceId, email, name, expires: Date.now() + 60000 };
     return metadata;
   }
