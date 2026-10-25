@@ -16,7 +16,7 @@ test('schema diagnostics identify fixed configuration categories without queryin
     ['メールアドレス', null, 'schema_email_missing'],
     ['Notion名', null, 'schema_tutor_missing'],
     ['メールアドレス', 'relation', 'schema_email_type'],
-    ['Notion名', 'people', 'schema_tutor_type'],
+    ['Notion名', 'relation', 'schema_tutor_type'],
   ]) {
     const schema = structuredClone(source);
     if (type) schema.properties[property].type = type;
@@ -30,7 +30,7 @@ const row = (address = email, name = 'Fixture Tutor') => ({ id: 'fixture-page', 
   'メールアドレス': { id: 'email-id', type: 'email', email: address },
   'Notion名': { id: 'name-id', type: 'rich_text', rich_text: [{ plain_text: name }] },
 } });
-function fixture({ result = { results: [row()], has_more: false }, nameResult, schema = source, database = { data_sources: [{ id: sourceId }] }, env = {}, failure } = {}) {
+function fixture({ result = { results: [row()], has_more: false }, nameResult, roster, schema = source, database = { data_sources: [{ id: sourceId }] }, env = {}, failure } = {}) {
   const calls = [];
   const resolve = createNotionTutorResolver({ env: { NOTION_API_KEY: 'PRIVATE_FIXTURE', ...env }, fetchImplementation: async (url, options) => {
     calls.push({ url: new URL(url), options });
@@ -38,8 +38,9 @@ function fixture({ result = { results: [row()], has_more: false }, nameResult, s
     assert.equal(options.redirect, 'error');
     assert.equal(options.headers['Notion-Version'], '2025-09-03');
     if (failure) throw new Error('PRIVATE_FIXTURE: RAW_PERSONAL_RESPONSE');
-    const isNameQuery = options.body && JSON.parse(options.body).filter.property === 'name-id';
-    const data = url.includes('/query?') ? (isNameQuery && nameResult ? nameResult : result) : url.includes('/data_sources/') ? schema : database;
+    const body = options.body && JSON.parse(options.body);
+    const isNameQuery = body?.filter?.property === 'name-id';
+    const data = url.includes('/query?') ? (body && !body.filter && roster ? roster(body) : isNameQuery && nameResult ? nameResult : result) : url.includes('/data_sources/') ? schema : database;
     return new Response(JSON.stringify(data), { status: 200 });
   } });
   return { resolve, calls };
@@ -61,6 +62,60 @@ test('read-only connection check reads schema without requesting people rows', a
   assert.equal((await f.resolve.checkConfiguration()).connected, true);
   assert.equal(f.calls.length, 2);
   assert.ok(f.calls.every(c => c.options.method === 'GET'));
+});
+
+const peopleSchema = { properties: { ...source.properties, 'Notion名': { id: 'name-id', type: 'people' } } };
+function peopleRow(address = email, personName = 'Fixture Tutor', personId = 'person-1', pageId = 'fixture-page') {
+  const value = row(address);
+  value.id = pageId;
+  value.properties['Notion名'] = { id: 'name-id', type: 'people', people: [{ object: 'user', id: personId, type: 'person', name: personName }] };
+  return value;
+}
+test('people property resolves one display name and checks paginated name collisions', async () => {
+  const target = peopleRow();
+  const f = fixture({ schema: peopleSchema, result: { results: [target] }, roster: body => body.start_cursor
+    ? { results: [target], has_more: false }
+    : { results: [peopleRow('other@example.invalid', 'Other Tutor', 'person-2', 'other-page')], has_more: true, next_cursor: 'next' } });
+  assert.equal(await f.resolve(email), 'Fixture Tutor');
+  const scans = f.calls.filter(c => c.options.body && !JSON.parse(c.options.body).filter);
+  assert.equal(scans.length, 2);
+  assert.deepEqual(scans[0].url.searchParams.getAll('filter_properties'), ['email-id', 'name-id']);
+});
+test('people schema check does not retrieve user records', async () => {
+  const f = fixture({ schema: peopleSchema });
+  assert.equal((await f.resolve.checkConfiguration()).connected, true);
+  assert.equal(f.calls.length, 2);
+});
+test('empty, multiple, partial, bot and truncated people properties fail closed', async () => {
+  for (const value of [[], [{ id: 'person-1' }], [{ id: 'person-1', type: 'bot', name: 'Bot' }],
+    [peopleRow().properties['Notion名'].people[0], peopleRow().properties['Notion名'].people[0]]]) {
+    const target = peopleRow();
+    target.properties['Notion名'].people = value;
+    await assert.rejects(fixture({ schema: peopleSchema, result: { results: [target] } }).resolve(email), e => e.code === 'invalid_person');
+  }
+  const target = peopleRow();
+  target.properties['Notion名'].has_more = true;
+  await assert.rejects(fixture({ schema: peopleSchema, result: { results: [target] } }).resolve(email), e => e.code === 'invalid_person');
+});
+test('same people display name under another account or user ID never grants access', async () => {
+  for (const personId of ['person-1', 'different-person']) {
+    const target = peopleRow();
+    const f = fixture({ schema: peopleSchema, result: { results: [target] }, roster: () => ({ results: [target, peopleRow('other@example.invalid', 'Fixture Tutor', personId, 'other-page')] }) });
+    await assert.rejects(f.resolve(email), e => e.code === 'ambiguous_name');
+  }
+});
+test('missing current row, unknown profiles, repeated cursors and oversized people roster fail closed', async () => {
+  const target = peopleRow();
+  const unknownProfile = peopleRow('other@example.invalid', 'Other Tutor', 'person-2', 'other-page');
+  delete unknownProfile.properties['Notion名'].people[0].name;
+  for (const [roster, code] of [
+    [() => ({ results: [] }), 'ambiguous_name'],
+    [() => ({ results: [target, unknownProfile] }), 'invalid_person'],
+    [() => ({ results: [], has_more: true, next_cursor: 'same' }), 'upstream'],
+    [body => ({ results: [], has_more: true, next_cursor: String(Number(body.start_cursor || 0) + 1) }), 'roster_limit'],
+  ]) {
+    await assert.rejects(fixture({ schema: peopleSchema, result: { results: [target] }, roster }).resolve(email), e => e.code === code);
+  }
 });
 
 for (const result of [{ results: [], has_more: false }, { results: [row('other@example.invalid')], has_more: false }, { results: [{ ...row(), archived: true }], has_more: false }]) {
