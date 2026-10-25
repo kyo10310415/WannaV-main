@@ -14,6 +14,7 @@ export class TutorSyncError extends Error {
       ambiguous_name: '担当名の重複、または照合中の登録変更を検出しました。Notionの担当者登録を確認してください。',
       invalid_person: 'Notion名にはユーザーを1人だけ登録してください。ユーザー情報の読取り権限も確認してください。',
       roster_profile: '担当表にプロフィールを取得できないユーザーがあります。Notionインテグレーションのユーザー情報読取り権限を確認してください。',
+      profile_not_found: '担当表のNotion名に、APIで取得できないユーザーが登録されています。照合のみ確認で表示するNotionの行を開き、現在有効なユーザーに修正してください。',
       invalid_name: 'Notionの担当名が空欄、長すぎる、または利用できない文字を含んでいます。',
       permissions: 'Notionの読取り権限が不足しています。接続とインテグレーションの権限を確認してください。',
       credentials: 'NotionのAPIキーを認証できません。Renderの設定を確認してください。',
@@ -136,7 +137,17 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
                 // missing names without logging or persisting the profile.
                 if (!profiles.has(person.id)) {
                   if (profiles.size >= 20) throw new TutorSyncError('roster_limit');
-                  const profile = await request(`/users/${id(person.id)}`);
+                  let profile;
+                  try { profile = await request(`/users/${id(person.id)}`); }
+                  catch (error) {
+                    if (error instanceof TutorSyncError && error.code === 'not_found') {
+                      const missing = new TutorSyncError('profile_not_found');
+                      // Only a validated record URL, never a name/email/user ID.
+                      if (/^[a-f\d-]{32,36}$/i.test(candidate.id || '')) missing.remediationUrl = `https://www.notion.so/${id(candidate.id).replaceAll('-', '')}`;
+                      throw missing;
+                    }
+                    throw error;
+                  }
                   if (profile.id !== person.id || typeof profile.name !== 'string') throw new TutorSyncError('roster_profile');
                   profiles.set(person.id, profile.name);
                 }
@@ -203,7 +214,8 @@ export function createTutorStatusHandler({ db, resolveTutorName }) {
         message: matched ? '照合できました。権限・対応付けは変更していません。' : 'このユーザー名と完全一致するメールアドレスの有効な行がNotionにありません。大小文字・前後の空白・接続先を確認してください。' });
     } catch (error) {
       const safe = error instanceof TutorSyncError ? error : new TutorSyncError('upstream');
-      return c.json({ matched: false, reason: safe.code, message: safe.message }, 503);
+      return c.json({ matched: false, reason: safe.code, message: safe.message,
+        ...(safe.remediationUrl ? { remediationUrl: safe.remediationUrl } : {}) }, 503);
     }
   };
 }
