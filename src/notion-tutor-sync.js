@@ -8,7 +8,20 @@ const DASHBOARD_ORIGIN = 'https://wannav-main.onrender.com';
 
 export class TutorSyncError extends Error {
   constructor(code) {
-    super('Notionの担当者情報を確認できません。管理者が接続設定・登録内容を確認してください。');
+    const messages = {
+      account_email: 'このアカウントのユーザー名がメールアドレス形式ではありません。',
+      ambiguous: 'Notionのメールアドレスが複数行に一致します。重複登録を確認してください。',
+      ambiguous_name: '担当名の重複、または照合中の登録変更を検出しました。Notionの担当者登録を確認してください。',
+      invalid_person: 'Notion名にはユーザーを1人だけ登録してください。ユーザー情報の読取り権限も確認してください。',
+      roster_profile: '担当表にプロフィールを取得できないユーザーがあります。Notionインテグレーションのユーザー情報読取り権限を確認してください。',
+      invalid_name: 'Notionの担当名が空欄、長すぎる、または利用できない文字を含んでいます。',
+      permissions: 'Notionの読取り権限が不足しています。接続とインテグレーションの権限を確認してください。',
+      credentials: 'NotionのAPIキーを認証できません。Renderの設定を確認してください。',
+      not_found: 'Notionの対象データベースを取得できません。接続先と共有設定を確認してください。',
+      rate_limit: 'Notionの利用回数制限に達しました。少し待ってから1件ずつ再試行してください。',
+      roster_limit: '担当表が検査上限を超えたため同期を停止しました。管理者へ連絡してください。',
+    };
+    super(messages[code] || 'Notionの担当者情報を確認できません。管理者が接続設定・登録内容を確認してください。');
     this.code = code;
   }
 }
@@ -115,7 +128,7 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
             const property = get(name, NAME_PROPERTY, candidate.properties || {});
             if (property?.type !== 'people' || !Array.isArray(property.people) || property.has_more) throw new TutorSyncError('invalid_person');
             for (const person of property.people) {
-              if (person.type !== 'person' || !person.id || typeof person.name !== 'string') throw new TutorSyncError('invalid_person');
+              if (person.type !== 'person' || !person.id || typeof person.name !== 'string') throw new TutorSyncError('roster_profile');
               if (person.name !== parsed.value) continue;
               if (++matches !== 1 || candidate.id !== row.id || person.id !== personId
                 || property.people.length !== 1
@@ -163,6 +176,24 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
 }
 
 export function isExtensionSso(origin) { return origin === EXTENSION_ORIGIN; }
+
+// Read-only diagnosis: never writes an account mapping or returns a tutor name.
+export function createTutorStatusHandler({ db, resolveTutorName }) {
+  return async c => {
+    c.header('Cache-Control', 'no-store');
+    if (c.get('user')?.role !== 'admin') return c.json({ error: 'Forbidden' }, 403);
+    const target = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(c.req.param('id'));
+    if (!target || target.role !== 'crew') return c.json({ error: '対象のcrewアカウントがありません。' }, 404);
+    try {
+      const matched = (await resolveTutorName(target.username)) !== null;
+      return c.json({ matched, reason: matched ? 'matched' : 'email_not_matched',
+        message: matched ? '照合できました。権限・対応付けは変更していません。' : 'このユーザー名と完全一致するメールアドレスの有効な行がNotionにありません。大小文字・前後の空白・接続先を確認してください。' });
+    } catch (error) {
+      const safe = error instanceof TutorSyncError ? error : new TutorSyncError('upstream');
+      return c.json({ matched: false, reason: safe.code, message: safe.message }, 503);
+    }
+  };
+}
 
 export function createTutorSyncHandler({ db, resolveTutorName }) {
   return async c => {

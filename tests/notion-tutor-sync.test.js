@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'node:crypto';
-import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, TutorSyncError, TUTOR_DATABASE_ID } from '../src/notion-tutor-sync.js';
+import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError, TUTOR_DATABASE_ID } from '../src/notion-tutor-sync.js';
 import { createSsoHandler } from '../src/sso.js';
 import { ensureNotionTutorApprovalColumn } from '../src/tutor-mapping.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -110,7 +110,7 @@ test('missing current row, unknown profiles, repeated cursors and oversized peop
   delete unknownProfile.properties['Notion名'].people[0].name;
   for (const [roster, code] of [
     [() => ({ results: [] }), 'ambiguous_name'],
-    [() => ({ results: [target, unknownProfile] }), 'invalid_person'],
+    [() => ({ results: [target, unknownProfile] }), 'roster_profile'],
     [() => ({ results: [], has_more: true, next_cursor: 'same' }), 'upstream'],
     [body => ({ results: [], has_more: true, next_cursor: String(Number(body.start_cursor || 0) + 1) }), 'roster_limit'],
   ]) {
@@ -164,6 +164,33 @@ function adminFixture(role, resolved = 'Fixture Tutor') {
   app.post('/users/:id/sync', createTutorSyncHandler({ db, resolveTutorName: async name => { lookedUp.push(name); return resolved; } }));
   return { writes, lookedUp, request: (headers = {}) => app.request('/users/2/sync', { method: 'POST', headers: { Origin: 'https://wannav-main.onrender.com', 'X-WannaV-Request': '1', ...headers }, body: JSON.stringify({ username: 'attacker@example.invalid', tutorName: 'Forged' }) }) };
 }
+
+test('account diagnosis returns only safe outcomes, requires admin, and never writes', async () => {
+  for (const role of ['admin', 'leader', 'crew']) {
+    for (const outcome of ['PRIVATE_TUTOR', null, new TutorSyncError('rate_limit'), new Error('PRIVATE_RESPONSE')]) {
+      let calls = 0;
+      const db = { prepare: () => ({ get: () => ({ id: 2, username: email, role: 'crew' }), run: () => assert.fail('diagnosis must not write') }) };
+      const app = new Hono();
+      app.use('*', async (c, next) => { c.set('user', { role }); await next(); });
+      app.get('/users/:id/status', createTutorStatusHandler({ db, resolveTutorName: async username => {
+        calls++; assert.equal(username, email);
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      } }));
+      const response = await app.request('/users/2/status');
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      const text = await response.text();
+      assert.equal(text.includes('PRIVATE'), false);
+      assert.equal(text.includes(email), false);
+      if (role !== 'admin') { assert.equal(response.status, 403); assert.equal(calls, 0); }
+      else {
+        assert.equal(calls, 1);
+        const value = JSON.parse(text);
+        assert.equal(value.reason, outcome instanceof Error ? (outcome.code || 'upstream') : outcome === null ? 'email_not_matched' : 'matched');
+      }
+    }
+  }
+});
 test('admin sync uses the stored account, ignores forged input and clears mapping on no match', async () => {
   for (const value of ['Fixture Tutor', null]) {
     const f = adminFixture('admin', value);

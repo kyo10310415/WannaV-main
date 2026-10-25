@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { canManageUser } from '../src/security.js';
 import { createUserManagementHandlers } from '../src/user-management.js';
 import { createSsoHandler } from '../src/sso.js';
-import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, TutorSyncError } from '../src/notion-tutor-sync.js';
+import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError } from '../src/notion-tutor-sync.js';
 
 // Exercise the real route/template without loading native SQLite or listening.
 function renderApp(role) {
@@ -15,7 +15,7 @@ function renderApp(role) {
     id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01', tutor_name: '"<script>unsafe</script>',
   }));
   const context = {
-    Hono, canManageUser, createUserManagementHandlers, createSsoHandler, createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, TutorSyncError,
+    Hono, canManageUser, createUserManagementHandlers, createSsoHandler, createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError,
     serve() {}, serveStatic: () => async (_c, next) => next(),
     bcrypt: {}, jwt: { verify: () => ({ userId: actor.id }) },
     parse: () => ({ auth_token: 'test-only-cookie' }), serialize: () => '',
