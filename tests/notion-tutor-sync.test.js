@@ -30,7 +30,7 @@ const row = (address = email, name = 'Fixture Tutor') => ({ id: 'fixture-page', 
   'メールアドレス': { id: 'email-id', type: 'email', email: address },
   'Notion名': { id: 'name-id', type: 'rich_text', rich_text: [{ plain_text: name }] },
 } });
-function fixture({ result = { results: [row()], has_more: false }, nameResult, roster, schema = source, database = { data_sources: [{ id: sourceId }] }, env = {}, failure } = {}) {
+function fixture({ result = { results: [row()], has_more: false }, nameResult, roster, userProfiles = {}, schema = source, database = { data_sources: [{ id: sourceId }] }, env = {}, failure } = {}) {
   const calls = [];
   const resolve = createNotionTutorResolver({ env: { NOTION_API_KEY: 'PRIVATE_FIXTURE', ...env }, fetchImplementation: async (url, options) => {
     calls.push({ url: new URL(url), options });
@@ -40,7 +40,7 @@ function fixture({ result = { results: [row()], has_more: false }, nameResult, r
     if (failure) throw new Error('PRIVATE_FIXTURE: RAW_PERSONAL_RESPONSE');
     const body = options.body && JSON.parse(options.body);
     const isNameQuery = body?.filter?.property === 'name-id';
-    const data = url.includes('/query?') ? (body && !body.filter && roster ? roster(body) : isNameQuery && nameResult ? nameResult : result) : url.includes('/data_sources/') ? schema : database;
+    const data = url.includes('/users/') ? userProfiles[url.split('/').at(-1)] || {} : url.includes('/query?') ? (body && !body.filter && roster ? roster(body) : isNameQuery && nameResult ? nameResult : result) : url.includes('/data_sources/') ? schema : database;
     return new Response(JSON.stringify(data), { status: 200 });
   } });
   return { resolve, calls };
@@ -106,7 +106,7 @@ test('same people display name under another account or user ID never grants acc
 });
 test('missing current row, unknown profiles, repeated cursors and oversized people roster fail closed', async () => {
   const target = peopleRow();
-  const unknownProfile = peopleRow('other@example.invalid', 'Other Tutor', 'person-2', 'other-page');
+  const unknownProfile = peopleRow('other@example.invalid', 'Other Tutor', sourceId, 'other-page');
   delete unknownProfile.properties['Notion名'].people[0].name;
   for (const [roster, code] of [
     [() => ({ results: [] }), 'ambiguous_name'],
@@ -115,6 +115,30 @@ test('missing current row, unknown profiles, repeated cursors and oversized peop
     [body => ({ results: [], has_more: true, next_cursor: String(Number(body.start_cursor || 0) + 1) }), 'roster_limit'],
   ]) {
     await assert.rejects(fixture({ schema: peopleSchema, result: { results: [target] }, roster }).resolve(email), e => e.code === code);
+  }
+});
+
+test('partial unrelated profiles are retrieved transiently and name collisions still fail', async () => {
+  const target = peopleRow();
+  const partial = peopleRow('other@example.invalid', 'Other Tutor', sourceId, 'other-page');
+  delete partial.properties['Notion名'].people[0].name;
+  for (const name of ['Other Tutor', 'Fixture Tutor']) {
+    const f = fixture({ schema: peopleSchema, result: { results: [target] },
+      roster: () => ({ results: [target, partial] }), userProfiles: { [sourceId]: { id: sourceId, name } } });
+    if (name === 'Other Tutor') assert.equal(await f.resolve(email), 'Fixture Tutor');
+    else await assert.rejects(f.resolve(email), e => e.code === 'ambiguous_name');
+    assert.equal(f.calls.filter(c => c.url.pathname.includes('/users/')).length, 1);
+  }
+});
+
+test('an unrelated named bot does not block a person, but a same-name bot fails closed', async () => {
+  const target = peopleRow();
+  for (const name of ['Other Bot', 'Fixture Tutor']) {
+    const botRow = peopleRow('bot@example.invalid', name, 'bot-id', 'bot-page');
+    botRow.properties['Notion名'].people[0].type = 'bot';
+    const f = fixture({ schema: peopleSchema, result: { results: [target] }, roster: () => ({ results: [target, botRow] }) });
+    if (name === 'Other Bot') assert.equal(await f.resolve(email), 'Fixture Tutor');
+    else await assert.rejects(f.resolve(email), e => e.code === 'ambiguous_name');
   }
 });
 

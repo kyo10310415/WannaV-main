@@ -117,6 +117,7 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
         // values so different Notion users with the same name cannot share access.
         let cursor, matches = 0;
         const seenCursors = new Set();
+        const profiles = new Map();
         const personId = get(name, NAME_PROPERTY).people[0].id;
         for (let page = 0; page < 10; page++) {
           const batch = await request(`/data_sources/${id(sourceId)}/query?${query}`, {
@@ -128,8 +129,20 @@ export function createNotionTutorResolver({ env = process.env, fetchImplementati
             const property = get(name, NAME_PROPERTY, candidate.properties || {});
             if (property?.type !== 'people' || !Array.isArray(property.people) || property.has_more) throw new TutorSyncError('invalid_person');
             for (const person of property.people) {
-              if (person.type !== 'person' || !person.id || typeof person.name !== 'string') throw new TutorSyncError('roster_profile');
-              if (person.name !== parsed.value) continue;
+              if (!person.id) throw new TutorSyncError('roster_profile');
+              let displayName = person.name;
+              if (typeof displayName !== 'string') {
+                // Page properties may contain partial user objects. Resolve
+                // missing names without logging or persisting the profile.
+                if (!profiles.has(person.id)) {
+                  if (profiles.size >= 20) throw new TutorSyncError('roster_limit');
+                  const profile = await request(`/users/${id(person.id)}`);
+                  if (profile.id !== person.id || typeof profile.name !== 'string') throw new TutorSyncError('roster_profile');
+                  profiles.set(person.id, profile.name);
+                }
+                displayName = profiles.get(person.id);
+              }
+              if (displayName !== parsed.value) continue;
               if (++matches !== 1 || candidate.id !== row.id || person.id !== personId
                 || property.people.length !== 1
                 || propertyText(get(email, EMAIL_PROPERTY, candidate.properties || {})) !== username) throw new TutorSyncError('ambiguous_name');
