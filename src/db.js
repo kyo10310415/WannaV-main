@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
+import { ensureTutorNameColumn } from './tutor-mapping.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
@@ -48,6 +49,8 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 `);
+
+ensureTutorNameColumn(db);
 
 // 既存テーブルに新しいカラムを追加（マイグレーション）
 try {

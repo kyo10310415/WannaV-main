@@ -23,8 +23,12 @@ export function createSsoHandler({ db, secret }) {
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
       return c.json({ error: 'Invalid system URL' }, 400);
     }
+    const storedUser = user.role === 'crew'
+      ? db.prepare('SELECT tutor_name FROM users WHERE id = ?').get(user.id)
+      : null;
+    const tutorName = user.role === 'crew' ? (storedUser?.tutor_name ?? null) : null;
     const token = jwt.sign({ userId: user.id, username: user.username, role: user.role,
-      targetUrl: system.url, type: 'sso' }, secret, {
+      targetUrl: system.url, type: 'sso', tutorName }, secret, {
       algorithm: 'HS256', expiresIn: '1h', issuer: 'https://wannav-main.onrender.com', audience: url.origin
     });
     c.header('Cache-Control', 'no-store');

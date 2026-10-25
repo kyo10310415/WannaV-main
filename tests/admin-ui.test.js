@@ -11,7 +11,7 @@ import { createSsoHandler } from '../src/sso.js';
 function renderApp(role) {
   const actor = { id: 1, username: 'actor', role, must_change_password: 0 };
   const users = ['admin', 'leader', 'crew'].map((role, index) => ({
-    id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01',
+    id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01', tutor_name: '"<script>unsafe</script>',
   }));
   const context = {
     Hono, canManageUser, createUserManagementHandlers, createSsoHandler,
@@ -45,6 +45,9 @@ for (const role of ['admin', 'leader']) {
     assert.equal(html.includes('onclick="changePassword(3,'), role === 'admin');
     assert.equal(html.includes('onclick="deleteUser(2,'), role === 'admin');
     assert.equal(html.includes('onclick="deleteUser(3,'), role === 'admin');
+    assert.equal(html.includes('id="tutor-name-4"'), role === 'admin');
+    assert.equal(html.includes('onclick="saveTutorName(4)"'), role === 'admin');
+    assert.equal(html.includes('value=""<script>unsafe'), false);
     assert.ok(html.includes('onclick="changePassword(4,'));
     assert.ok(html.includes('onclick="deleteUser(4,'));
     const creationScript = html.slice(html.indexOf('function showAddUserModal'), html.indexOf('async function changePassword'));

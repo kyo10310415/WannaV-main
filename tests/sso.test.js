@@ -8,7 +8,7 @@ const secret = 'test-only-sso-key-'.repeat(4);
 function fixture(role, systems = [{ id: 1, url: 'https://service.example.test/', required_role: 'leader' }]) {
   const app = new Hono();
   app.use('*', async (c, next) => { c.set('user', { id: 7, username: 'test-user', role }); await next(); });
-  app.post('/sso', createSsoHandler({ secret, db: { prepare: () => ({ all: () => systems }) } }));
+  app.post('/sso', createSsoHandler({ secret, db: { prepare: () => ({ all: () => systems, get: () => ({ tutor_name: 'Assigned Tutor' }) }) } }));
   return body => app.request('/sso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 for (const role of ['crew', 'unknown', 'constructor', null]) {
@@ -46,4 +46,19 @@ test('unknown required roles and insecure destinations fail closed', async () =>
   for (const url of ['http://service.example.test/', 'https://user:pass@service.example.test/', 'https://service.example.test/?query=yes', 'invalid']) {
     assert.equal((await fixture('admin', [{ id: 1, url, required_role: 'crew' }])({ systemId: 1 })).status, 400);
   }
+});
+
+
+test('crew SSO signs stored assignment and ignores request supplied tutor', async () => {
+  const response = await fixture('crew', [{ id: 1, url: 'https://service.example.test/', required_role: 'crew' }])({ systemId: 1, tutorName: 'Forged Tutor' });
+  const claims = jwt.verify((await response.json()).token, secret);
+  assert.equal(claims.tutorName, 'Assigned Tutor');
+});
+
+test('unregistered mapping is null without guessing username', async () => {
+  const app = new Hono();
+  app.use('*', async (c, next) => { c.set('user', { id: 7, username: 'Matching-looking name', role: 'crew', tutorName: 'Untrusted context' }); await next(); });
+  app.post('/sso', createSsoHandler({ secret, db: { prepare: () => ({ all: () => [{ id: 1, url: 'https://service.example.test/', required_role: 'crew' }], get: () => ({ tutor_name: null }) }) } }));
+  const response = await app.request('/sso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ systemId: 1, tutorName: 'Forged' }) });
+  assert.equal(jwt.verify((await response.json()).token, secret).tutorName, null);
 });

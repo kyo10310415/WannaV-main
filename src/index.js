@@ -443,7 +443,7 @@ app.get('/', authMiddleware, (c) => {
 // 管理画面
 app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
   const user = c.get('user');
-  const users = db.prepare('SELECT id, username, role, must_change_password, created_at FROM users').all();
+  const users = db.prepare('SELECT id, username, role, tutor_name, must_change_password, created_at FROM users').all();
   const systems = db.prepare('SELECT * FROM systems ORDER BY order_index ASC').all();
 
   return c.html(`
@@ -519,6 +519,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                                     ${canManageUser(user, u) ? `<button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
                                         <i class="fas fa-key"></i> パスワード変更
                                     </button>` : ''}
+                                    ${user.role === 'admin' && u.role === 'crew' ? `<input id="tutor-name-${u.id}" aria-label="担任Tutor対応名" maxlength="100" value="${String(u.tutor_name || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}" class="border rounded px-2 py-1"><button onclick="saveTutorName(${u.id})" class="text-blue-600">Tutor対応を保存</button>` : ''}
                                     ${user.role === 'admin' && u.username !== 'admin' ? `<button onclick="changeRole(${u.id}, '${u.username}', '${u.role}')" class="text-purple-600 hover:text-purple-900"><i class="fas fa-user-shield"></i> 権限変更</button>` : ''}
                                     ${u.username !== 'admin' && canManageUser(user, u) ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
                                 </td>
@@ -627,6 +628,16 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                     alert('エラー: ' + (error.response?.data?.error || 'ユーザーの追加に失敗しました'));
                 }
             });
+        }
+
+        async function saveTutorName(userId) {
+            const tutorName = document.getElementById('tutor-name-' + userId).value;
+            try {
+                await axios.put('/api/admin/users/' + userId + '/tutor', { tutorName });
+                alert('Tutor対応を保存しました。延長管理をダッシュボードから開き直してください。');
+            } catch (error) {
+                alert('エラー: ' + (error.response?.data?.error || '保存に失敗しました'));
+            }
         }
 
         async function changePassword(userId, username) {
@@ -913,6 +924,7 @@ app.post('/api/generate-sso-token', authMiddleware, createSsoHandler({ db, secre
 // Account creation and changes share server-side privilege checks.
 const userManagement = createUserManagementHandlers({ db, bcrypt });
 app.post('/api/admin/users', authMiddleware, leaderMiddleware, userManagement.create);
+app.put('/api/admin/users/:id/tutor', authMiddleware, adminMiddleware, userManagement.tutor);
 app.put('/api/admin/users/:id/password', authMiddleware, leaderMiddleware, userManagement.password);
 app.delete('/api/admin/users/:id', authMiddleware, leaderMiddleware, userManagement.remove);
 

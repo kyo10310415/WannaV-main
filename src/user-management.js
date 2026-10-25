@@ -1,3 +1,4 @@
+import { parseTutorName } from './tutor-mapping.js';
 import { canCreateUser, canManageUser } from './security.js';
 
 export function createUserManagementHandlers({ db, bcrypt }) {
@@ -33,6 +34,19 @@ export function createUserManagementHandlers({ db, bcrypt }) {
         console.error('Add user error:', error);
         return c.json({ error: 'ユーザー追加中にエラーが発生しました' }, 500);
       }
+    },
+    tutor: async (c) => {
+      if (c.get('user')?.role !== 'admin') return c.json({ error: 'Forbidden' }, 403);
+      let body;
+      try { body = await c.req.json(); } catch { return c.json({ error: 'Invalid request' }, 400); }
+      const parsed = parseTutorName(body?.tutorName);
+      if (!parsed.valid) return c.json({ error: '担任Tutor名は100文字以内の単一の名前を指定してください' }, 400);
+      const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(c.req.param('id'));
+      if (!target) return c.json({ error: 'ユーザーが見つかりません' }, 404);
+      if (target.role !== 'crew') return c.json({ error: 'crewのみ対応付けできます' }, 400);
+      db.prepare('UPDATE users SET tutor_name = ? WHERE id = ?').run(parsed.value, target.id);
+      c.header('Cache-Control', 'no-store');
+      return c.json({ success: true });
     },
     password: async (c) => {
       try {
