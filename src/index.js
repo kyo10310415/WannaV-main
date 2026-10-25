@@ -9,7 +9,7 @@ import { canManageUser } from './security.js';
 import { createUserManagementHandlers } from './user-management.js';
 import db from './db.js';
 import { createSsoHandler } from './sso.js';
-import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, TutorSyncError } from './notion-tutor-sync.js';
+import { createNotionTutorResolver, createTutorSyncHandler, createTutorUnlinkHandler, createTutorStatusHandler, TutorSyncError } from './notion-tutor-sync.js';
 
 const app = new Hono();
 const PORT = process.env.PORT || 3000;
@@ -521,7 +521,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                                     ${canManageUser(user, u) ? `<button onclick="changePassword(${u.id}, '${u.username}')" class="text-blue-600 hover:text-blue-900">
                                         <i class="fas fa-key"></i> パスワード変更
                                     </button>` : ''}
-                                    ${user.role === 'admin' && u.role === 'crew' ? `<input id="tutor-name-${u.id}" aria-label="担任Tutor対応名" readonly value="${String(u.tutor_name || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}" class="border rounded px-2 py-1"><button onclick="syncTutorName(${u.id})" class="text-blue-600">${u.notion_tutor_approved ? 'Notionから担当を同期' : '初回承認・Notion同期'}</button>${u.notion_tutor_approved ? `<button onclick="unlinkTutorName(${u.id})" class="text-gray-600">Notion連携を解除</button>` : ''}` : ''}
+                                    ${user.role === 'admin' && u.role === 'crew' ? `<input id="tutor-name-${u.id}" aria-label="担任Tutor対応名" readonly value="${String(u.tutor_name || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}" class="border rounded px-2 py-1"><button onclick="checkTutorStatus(${u.id})" class="text-gray-600">照合のみ確認</button><button onclick="syncTutorName(${u.id})" class="text-blue-600">${u.notion_tutor_approved ? 'Notionから担当を同期' : '初回承認・Notion同期'}</button>${u.notion_tutor_approved ? `<button onclick="unlinkTutorName(${u.id})" class="text-gray-600">Notion連携を解除</button>` : ''}` : ''}
                                     ${user.role === 'admin' && u.username !== 'admin' ? `<button onclick="changeRole(${u.id}, '${u.username}', '${u.role}')" class="text-purple-600 hover:text-purple-900"><i class="fas fa-user-shield"></i> 権限変更</button>` : ''}
                                     ${u.username !== 'admin' && canManageUser(user, u) ? `<button onclick="deleteUser(${u.id}, '${u.username}')" class="text-red-600 hover:text-red-900"><i class="fas fa-trash"></i> 削除</button>` : ''}
                                 </td>
@@ -630,6 +630,15 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                     alert('エラー: ' + (error.response?.data?.error || 'ユーザーの追加に失敗しました'));
                 }
             });
+        }
+
+        async function checkTutorStatus(userId) {
+            try {
+                const response = await axios.get('/api/admin/users/' + userId + '/tutor/status');
+                alert(response.data.message);
+            } catch (error) {
+                alert(error.response?.data?.message || '照合できませんでした。時間をおいて再試行してください。');
+            }
         }
 
         async function syncTutorName(userId) {
@@ -942,6 +951,7 @@ app.post('/api/generate-sso-token', authMiddleware, createSsoHandler({ db, secre
 const userManagement = createUserManagementHandlers({ db, bcrypt });
 app.post('/api/admin/users', authMiddleware, leaderMiddleware, userManagement.create);
 app.put('/api/admin/users/:id/tutor', authMiddleware, adminMiddleware, c => c.json({ error: '担当者対応はNotionから同期してください。' }, 409));
+app.get('/api/admin/users/:id/tutor/status', authMiddleware, adminMiddleware, createTutorStatusHandler({ db, resolveTutorName }));
 app.post('/api/admin/users/:id/tutor/sync', authMiddleware, adminMiddleware, createTutorSyncHandler({ db, resolveTutorName }));
 app.delete('/api/admin/users/:id/tutor/sync', authMiddleware, adminMiddleware, createTutorUnlinkHandler({ db }));
 app.get('/api/admin/notion-tutors/status', authMiddleware, adminMiddleware, async c => {
