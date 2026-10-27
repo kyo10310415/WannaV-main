@@ -52,6 +52,11 @@ WannaV関連システムへのアクセスを一元管理するダッシュボ�
 
 ### Renderへのデプロイ
 
+実行環境は `.node-version` の Node.js 22.23.4 を使用します。Render に
+`NODE_VERSION` を設定している場合はファイルより優先されるため、同じ版に
+揃えてください。更新時は依存関係のインストールと `npm test` を実行し、
+配備ログの Node.js バージョンを確認してください。
+
 1. **GitHubリポジトリと連携**
    - Render.comにログイン
    - 「New Web Service」を選択
