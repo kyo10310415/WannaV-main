@@ -22,7 +22,16 @@ function renderApp(role) {
     console: { log() {}, error() {} },
     db: { prepare(sql) { return {
       get() { return sql.includes('FROM sessions') ? { user_id: actor.id } : actor; },
-      all() { return sql.includes('FROM users') ? users : []; },
+      all() {
+        if (sql.includes('FROM users')) return users;
+        if (sql.includes('FROM systems')) return [{
+          id: 42,
+          name: 'WannaV 延長管理システム',
+          url: 'https://extended-management.onrender.com/',
+          required_role: 'crew',
+        }];
+        return [];
+      },
     }; } },
   };
   const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8')
@@ -30,6 +39,15 @@ function renderApp(role) {
   runInNewContext(`${source}\nglobalThis.testApp = app;`, context);
   return context.testApp;
 }
+
+test('dashboard requests SSO for the selected system ID', async () => {
+  const response = await renderApp('crew').request('/');
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(html.includes("openSystemWithSSO(42, 'https://extended-management.onrender.com/'"));
+  assert.ok(html.includes("axios.post('/api/generate-sso-token', {\n                    systemId: systemId"));
+  assert.equal(html.includes('targetUrl: targetUrl'), false);
+});
 
 for (const role of ['admin', 'leader']) {
   test(`${role} admin page renders valid browser JS and appropriate account controls`, async () => {

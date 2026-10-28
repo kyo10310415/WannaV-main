@@ -369,7 +369,7 @@ app.get('/', authMiddleware, (c) => {
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 ${systems.map(sys => `
-                    <a href="#" onclick="openSystemWithSSO('${sys.url}', '${sys.name}'); return false;" 
+                    <a href="#" onclick="openSystemWithSSO(${sys.id}, '${sys.url}', '${sys.name}'); return false;"
                        class="block bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white rounded-lg p-6 shadow-md transition duration-200 transform hover:scale-105">
                         <div class="flex items-center justify-between">
                             <div class="flex-1">
@@ -405,13 +405,13 @@ app.get('/', authMiddleware, (c) => {
     <script>
         axios.defaults.withCredentials = true;
         
-        async function openSystemWithSSO(targetUrl, systemName) {
+        async function openSystemWithSSO(systemId, targetUrl, systemName) {
             try {
                 console.log(\`🔑 SSO トークン取得中: \${systemName}\`);
                 
                 // SSOトークンを生成
                 const response = await axios.post('/api/generate-sso-token', {
-                    targetUrl: targetUrl
+                    systemId: systemId
                 });
                 
                 if (response.data.success) {
