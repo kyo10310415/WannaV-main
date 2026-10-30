@@ -1,3 +1,5 @@
+import { createLoginHandler } from './login.js';
+import { initialCredentialSessionAllowed } from './initial-credentials.js';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -70,6 +72,8 @@ const authMiddleware = async (c, next) => {
       console.log('❌ 認証失敗: ユーザーなし → /loginにリダイレクト');
       return c.redirect('/login');
     }
+
+    if (!initialCredentialSessionAllowed(user, decoded)) return c.redirect('/login');
 
     // 初回ログイン時のパスワード変更チェック（change-passwordページ以外）
     if (user.must_change_password && !c.req.path.startsWith('/change-password') && !c.req.path.startsWith('/api/change-password')) {
@@ -582,6 +586,26 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
 
         function hideModal() {
             document.getElementById('modal').classList.add('hidden');
+            document.getElementById('modal-content').replaceChildren();
+        }
+
+        function showInitialCredential(username, password) {
+            showModal('初期パスワード（この画面で一度だけ表示）', '<p class="mb-3">本人へ安全に伝え、初回ログインで変更してもらってください。</p><p id="initial-user" class="mb-2"></p><input id="initial-password" readonly autocomplete="off" class="w-full border p-2"><button id="copy-initial-password" type="button" class="mt-3 border p-2">コピー</button><p id="initial-copy-status"></p><button id="close-initial-password" type="button" class="mt-3 border p-2">閉じて一覧を更新</button>');
+            document.getElementById('initial-user').textContent = username;
+            const input = document.getElementById('initial-password');
+            input.value = password;
+            document.getElementById('copy-initial-password').addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(input.value);
+                    document.getElementById('initial-copy-status').textContent = 'コピーしました。共有後はクリップボードから削除してください。';
+                } catch {
+                    document.getElementById('initial-copy-status').textContent = 'コピーできませんでした。入力欄を選択して手動でコピーしてください。';
+                    input.focus(); input.select();
+                }
+            });
+            document.getElementById('close-initial-password').addEventListener('click', () => {
+                input.value = ''; hideModal(); location.reload();
+            });
         }
 
         function showAddUserModal() {
@@ -600,7 +624,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                     </div>
                     <div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
                         <i class="fas fa-info-circle mr-2"></i>
-                        初期パスワードは <strong>1111</strong> です。初回ログイン時にパスワード変更が要求されます。
+                        初期パスワードをランダム発行し、作成後に一度だけ表示します。
                     </div>
                     <div class="flex space-x-4">
                         <button type="submit" class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">追加</button>
@@ -619,9 +643,8 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
                 };
                 
                 try {
-                    await axios.post('/api/admin/users', data);
-                    alert('ユーザーを追加しました（初期パスワード: 1111）');
-                    location.reload();
+                    const response = await axios.post('/api/admin/users', data);
+                    showInitialCredential(data.username, response.data.initialPassword);
                 } catch (error) {
                     alert('エラー: ' + (error.response?.data?.error || 'ユーザーの追加に失敗しました'));
                 }
@@ -629,14 +652,12 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
         }
 
         async function changePassword(userId, username) {
-            const newPassword = prompt(\`\${username} の新しいパスワードを入力してください:\`);
-            if (!newPassword) return;
-            
+            if (!confirm('このユーザーの初期パスワードを再発行します。既存セッションは失効し、次回ログインで変更が必要です。')) return;
             try {
-                await axios.put(\`/api/admin/users/\${userId}/password\`, { password: newPassword });
-                alert('パスワードを変更しました');
+                const response = await axios.put(\`/api/admin/users/\${userId}/password\`, {});
+                showInitialCredential(username, response.data.initialPassword);
             } catch (error) {
-                alert('エラー: ' + (error.response?.data?.error || 'パスワード変更に失敗しました'));
+                alert('パスワードを再発行できませんでした。');
             }
         }
 
@@ -832,57 +853,7 @@ app.get('/admin', authMiddleware, leaderMiddleware, (c) => {
 });
 
 // API: ログイン
-app.post('/api/login', async (c) => {
-  try {
-    const { username, password } = await c.req.json();
-    console.log(`🔐 ログイン試行: ユーザー名=${username}`);
-
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    if (!user) {
-      console.log(`❌ ログイン失敗: ユーザーが存在しません (${username})`);
-      return c.json({ error: 'ユーザー名またはパスワードが正しくありません' }, 401);
-    }
-
-    console.log(`✅ ユーザー発見: ${username} (ID: ${user.id})`);
-    
-    const valid = bcrypt.compareSync(password, user.password);
-    if (!valid) {
-      console.log(`❌ ログイン失敗: パスワードが一致しません (${username})`);
-      return c.json({ error: 'ユーザー名またはパスワードが正しくありません' }, 401);
-    }
-
-    console.log(`✅ パスワード認証成功: ${username}`);
-
-    // JWTトークンの生成
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    console.log(`✅ JWTトークン生成完了: ${username}`);
-
-    // セッションの保存
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)').run(user.id, token, expiresAt);
-    console.log(`✅ セッション保存完了: ${username}`);
-
-    // Cookieの設定
-    const cookieOptions = {
-      httpOnly: true,
-      secure: true, // RenderはHTTPSなので常にtrue
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/'
-    };
-    
-    const cookieHeader = serialize('auth_token', token, cookieOptions);
-    c.header('Set-Cookie', cookieHeader);
-    
-    console.log('🍪 認証Cookie設定完了');
-    console.log(`✅ ログイン成功: ${username}`);
-    
-    return c.json({ success: true, username: user.username });
-  } catch (error) {
-    console.error('❌ Login error:', error);
-    return c.json({ error: 'ログイン処理中にエラーが発生しました' }, 500);
-  }
-});
+app.post('/api/login', createLoginHandler({ db, bcrypt, jwt, secret: JWT_SECRET }));
 
 // API: 初回パスワード変更
 app.post('/api/change-password', authMiddleware, async (c) => {

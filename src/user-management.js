@@ -1,3 +1,4 @@
+import { createInitialPassword } from './initial-credentials.js';
 import { parseTutorName } from './tutor-mapping.js';
 import { canCreateUser, canManageUser } from './security.js';
 
@@ -9,7 +10,6 @@ export function createUserManagementHandlers({ db, bcrypt }) {
         if (!canCreateUser(c.get('user'), role)) {
           return c.json({ error: 'この権限のユーザーを作成する権限がありません' }, 403);
         }
-        const password = '1111'; // 初期パスワードは1111
 
         const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
         if (existing) {
@@ -21,17 +21,19 @@ export function createUserManagementHandlers({ db, bcrypt }) {
           return c.json({ error: '無効な権限です' }, 400);
         }
 
+        const password = createInitialPassword();
         const hashedPassword = bcrypt.hashSync(password, 10);
-        // admin以外は初回パスワード変更を要求
-        const mustChangePassword = username !== 'admin' ? 1 : 0;
+        // All newly issued credentials require a first-login password change.
+        const mustChangePassword = 1;
 
         const result = db.prepare('INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, ?)').run(username, hashedPassword, role, mustChangePassword);
 
-        console.log(`✅ 新規ユーザー作成: ${username} (role: ${role})`);
+        console.log('User credential issued');
 
-        return c.json({ success: true, userId: result.lastInsertRowid });
+        c.header('Cache-Control', 'no-store');
+        return c.json({ success: true, userId: result.lastInsertRowid, initialPassword: password });
       } catch (error) {
-        console.error('Add user error:', error);
+        console.error('Add user failed');
         return c.json({ error: 'ユーザー追加中にエラーが発生しました' }, 500);
       }
     },
@@ -51,7 +53,6 @@ export function createUserManagementHandlers({ db, bcrypt }) {
     password: async (c) => {
       try {
         const userId = c.req.param('id');
-        const { password } = await c.req.json();
 
         const target = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(userId);
         if (!target) return c.json({ error: 'ユーザーが見つかりません' }, 404);
@@ -59,15 +60,17 @@ export function createUserManagementHandlers({ db, bcrypt }) {
           return c.json({ error: 'このユーザーを変更する権限がありません' }, 403);
         }
 
+        const password = createInitialPassword();
         const hashedPassword = bcrypt.hashSync(password, 10);
-        db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, userId);
+        db.prepare('UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?').run(hashedPassword, userId);
 
         // そのユーザーの全セッションを削除（再ログインを強制）
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
 
-        return c.json({ success: true });
+        c.header('Cache-Control', 'no-store');
+        return c.json({ success: true, initialPassword: password });
       } catch (error) {
-        console.error('Change password error:', error);
+        console.error('Password reissue failed');
         return c.json({ error: 'パスワード変更中にエラーが発生しました' }, 500);
       }
     },
