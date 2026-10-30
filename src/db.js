@@ -1,3 +1,4 @@
+import { ensureBootstrapAdmin } from './bootstrap-admin.js';
 import Database from 'better-sqlite3';
 import bcrypt from 'bcrypt';
 import { ensureTutorNameColumn } from './tutor-mapping.js';
@@ -100,23 +101,9 @@ try {
   console.log('ℹ️  ロール移行処理をスキップ:', e.message);
 }
 
-// デフォルトの管理者ユーザーを作成（username: admin, password: admin123）
-const checkAdmin = db.prepare('SELECT COUNT(*) as count FROM users WHERE username = ?').get('admin');
-console.log(`📊 既存の管理者ユーザー数: ${checkAdmin.count}`);
+// Existing administrators are never changed or promoted during startup.
+ensureBootstrapAdmin({ db, bcrypt });
 
-if (checkAdmin.count === 0) {
-  const hashedPassword = bcrypt.hashSync('admin123', 10);
-  db.prepare('INSERT INTO users (username, password, role, must_change_password) VALUES (?, ?, ?, ?)').run('admin', hashedPassword, 'admin', 0);
-  console.log('✅ デフォルト管理者ユーザーを作成しました (username: admin, role: admin)');
-} else {
-  console.log('ℹ️  管理者ユーザーは既に存在します');
-  // 既存のadminユーザーのroleを確実に'admin'に設定
-  db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', 'admin');
-}
-
-// 全ユーザーを確認
-const allUsers = db.prepare('SELECT id, username, role, must_change_password FROM users').all();
-console.log('📋 現在のユーザー一覧:', allUsers);
 
 // デフォルトのシステムリンクを追加
 const checkSystems = db.prepare('SELECT COUNT(*) as count FROM systems').get();

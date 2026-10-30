@@ -1,3 +1,5 @@
+import { createLoginHandler } from '../src/login.js';
+import { initialCredentialSessionAllowed } from '../src/initial-credentials.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -14,7 +16,7 @@ function renderApp(role) {
     id: index + 2, username: `target-${role}`, role, created_at: '2026-01-01', tutor_name: '"<script>unsafe</script>',
   }));
   const context = {
-    Hono, canManageUser, createUserManagementHandlers, createSsoHandler,
+    Hono, canManageUser, createUserManagementHandlers, createSsoHandler, createLoginHandler, initialCredentialSessionAllowed,
     serve() {}, serveStatic: () => async (_c, next) => next(),
     bcrypt: {}, jwt: { verify: () => ({ userId: actor.id }) },
     parse: () => ({ auth_token: 'test-only-cookie' }), serialize: () => '',
@@ -75,3 +77,23 @@ for (const role of ['admin', 'leader']) {
     assert.equal(creationScript.includes('value="admin"'), role === 'admin');
   });
 }
+
+
+async function credentialUiFixture() {
+ const html=await (await renderApp('admin').request('/admin')).text();
+ const source=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('function showInitialCredential'));
+ const nodes=new Map();const requests=[];const copies=[];let reloads=0;
+ function node(id){if(!nodes.has(id))nodes.set(id,{value:'',textContent:'',innerHTML:'',handlers:{},classList:{add(){},remove(){}},addEventListener(event,callback){this.handlers[event]=callback;},replaceChildren(){this.innerHTML='';},focus(){},select(){}});return nodes.get(id);}
+ const context={document:{getElementById:node},navigator:{clipboard:{async writeText(value){copies.push(value);}}},location:{reload(){reloads++;}},confirm:()=>true,alert(){throw new Error('unexpected UI error');},FormData:class {get(key){return key==='username'?'<b data-synthetic>synthetic</b>':'crew';}},axios:{async post(url,body){requests.push({url,body});return {data:{initialPassword:'synthetic-only-temporary-credential'}};},async put(url,body){requests.push({url,body});return {data:{initialPassword:'synthetic-only-reissued-credential'}};}}};
+ runInNewContext(source,context);return {context,node,requests,copies,get reloads(){return reloads;}};
+}
+test('real create UI displays issued credential as value once, copies and clears on close',async()=>{
+ const f=await credentialUiFixture();f.context.showAddUserModal();await f.node('addUserForm').handlers.submit({preventDefault(){},target:{}});
+ assert.equal(f.requests.length,1);assert.equal(f.requests[0].url,'/api/admin/users');assert.equal(f.node('initial-password').value==='synthetic-only-temporary-credential',true);
+ assert.equal(f.node('initial-user').textContent==='<b data-synthetic>synthetic</b>',true);assert.equal(f.node('modal-content').innerHTML.includes('synthetic-only-temporary-credential'),false);
+ await f.node('copy-initial-password').handlers.click();assert.equal(f.copies.length,1);assert.equal(f.copies[0]===f.node('initial-password').value,true);
+ f.node('close-initial-password').handlers.click();assert.equal(f.node('initial-password').value,'');assert.equal(f.node('modal-content').innerHTML,'');assert.equal(f.reloads,1);
+});
+test('real reset UI sends no operator-selected password and uses the same one-time display',async()=>{
+ const f=await credentialUiFixture();await f.context.changePassword(2,'synthetic');assert.equal(f.requests[0].url,'/api/admin/users/2/password');assert.equal(Object.keys(f.requests[0].body).length,0);assert.equal(f.node('initial-password').value==='synthetic-only-reissued-credential',true);assert.equal(f.reloads,0);
+});
